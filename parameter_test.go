@@ -1,7 +1,6 @@
 package awsssm
 
 import (
-	"bytes"
 	"reflect"
 	"testing"
 )
@@ -114,22 +113,6 @@ func TestParameters_Decode(t *testing.T) {
 	}
 }
 
-func TestParameters_JsonMarshal_Success(t *testing.T) {
-
-	jsonByteParams := []byte(`{"DB_HOST":"rds.something.aws.com","DB_PASSWORD":"something-secure"}`)
-	basePath := "/my-service/dev/"
-	parameters := getParametersMap()
-
-	parameter := NewParameters(basePath, parameters)
-	jsonBytes, err := parameter.JSONMarshal()
-	if err != nil {
-		t.Errorf(`Unexpected error: %s`, err)
-	}
-	if bytes.Compare(jsonBytes, jsonByteParams) != 0 {
-		t.Errorf(`Unexpected value: got %s, expected %s`, jsonBytes, jsonByteParams)
-	}
-
-}
 func getParametersMap() map[string]*Parameter {
 	return map[string]*Parameter{
 		"/my-service/dev/DB_PASSWORD": {ssmParameter: param1},

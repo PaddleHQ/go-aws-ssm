@@ -1,8 +1,8 @@
 package awsssm
 
 import (
-	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/service/ssm"
@@ -36,6 +36,15 @@ type Parameters struct {
 	parameters map[string]*Parameter
 }
 
+//Read implements the io.Reader interface for the key/value pair
+func (p *Parameters) Read(des []byte) (n int, err error) {
+	bytesJSON, err := json.Marshal(p.getKeyValueMap())
+	if err != nil {
+		return 0, err
+	}
+	return copy(des, bytesJSON), io.EOF
+}
+
 //GetValueByName returns the value based on the name
 //so the AWS Parameter Store parameter name is base path + name
 func (p *Parameters) GetValueByName(name string) string {
@@ -62,33 +71,10 @@ func (p *Parameters) Decode(output interface{}) error {
 	return mapstructure.Decode(p.getKeyValueMap(), output)
 }
 
-//JSONMarshal marshals in json format the key value map
-//This can be used with bytes.NewBuffer to create a new io.Reader
-//and then used with tools like viper https://github.com/spf13/viper
-func (p *Parameters) JSONMarshal() ([]byte, error) {
-	bytes.NewBuffer([]byte{})
-	return json.Marshal(p.getKeyValueMap())
-}
-
 func (p *Parameters) getKeyValueMap() map[string]string {
 	keyValue := make(map[string]string, len(p.parameters))
 	for k, v := range p.parameters {
 		keyValue[strings.Replace(k, p.basePath, "", 1)] = v.GetValue()
 	}
 	return keyValue
-}
-
-//JSONMarshallParameters will return the error if not nil or the json format of the key/value
-//for example:
-// 	paramsByte, err := awsssm.JSONMarshallParameters(
-//		pmstore.GetAllParametersByPath("/my-service/dev/", true),
-//	)
-//	if err != nil {
-//		return err
-//	}
-func JSONMarshallParameters(parameters *Parameters, err error) ([]byte, error) {
-	if err != nil {
-		return nil, err
-	}
-	return parameters.JSONMarshal()
 }
