@@ -11,6 +11,17 @@ type env struct {
 	NotMappedField   string `mapstructure:"NOT_THERE"`
 }
 
+func TestParameter_SetValue(t *testing.T) {
+	p := Parameter{}
+
+	value := "value"
+	p.SetValue(value)
+
+	if p.GetValue() != value {
+		t.Errorf(`Unexpected value: got %s, expected %s`, p.GetValue(), value)
+	}
+}
+
 func TestParameters_GetValueByName(t *testing.T) {
 	tests := []struct {
 		name          string

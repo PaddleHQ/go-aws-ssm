@@ -22,6 +22,11 @@ func (p *Parameter) GetValue() string {
 	return *p.ssmParameter.Value
 }
 
+//SetValue return the actual value of the parameter. The setter is mainly for testing purposes.
+func (p *Parameter) SetValue(val string) {
+	*p.ssmParameter.Value = val
+}
+
 //NewParameters creates a Parameters
 func NewParameters(basePath string, parameters map[string]*Parameter) *Parameters {
 	return &Parameters{
