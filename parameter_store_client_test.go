@@ -47,8 +47,8 @@ func TestClient_GetParametersByPath(t *testing.T) {
 			expectedOutput: &Parameters{
 				basePath: "/my-service/dev/",
 				parameters: map[string]*Parameter{
-					"/my-service/dev/DB_PASSWORD": {ssmParameter: param1},
-					"/my-service/dev/DB_HOST":     {ssmParameter: param2},
+					"/my-service/dev/DB_PASSWORD": {Value: param1.Value},
+					"/my-service/dev/DB_HOST":     {Value: param2.Value},
 				},
 			},
 		},
