@@ -42,7 +42,7 @@ func (c *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*Pa
 		if v.Name == nil {
 			continue
 		}
-		parameters.parameters[*v.Name] = &Parameter{ssmParameter: v}
+		parameters.parameters[*v.Name] = &Parameter{Value: v.Value}
 	}
 	return parameters, nil
 }

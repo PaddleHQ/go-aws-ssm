@@ -115,7 +115,7 @@ func TestParameters_Decode(t *testing.T) {
 
 func getParametersMap() map[string]*Parameter {
 	return map[string]*Parameter{
-		"/my-service/dev/DB_PASSWORD": {ssmParameter: param1},
-		"/my-service/dev/DB_HOST":     {ssmParameter: param2},
+		"/my-service/dev/DB_PASSWORD": {Value: param1.Value},
+		"/my-service/dev/DB_HOST":     {Value: param2.Value},
 	}
 }

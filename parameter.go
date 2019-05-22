@@ -5,21 +5,20 @@ import (
 	"io"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/service/ssm"
 	"github.com/mitchellh/mapstructure"
 )
 
 //Parameter holds a Systems Manager parameter from AWS Parameter Store
 type Parameter struct {
-	ssmParameter *ssm.Parameter
+	Value *string
 }
 
-//GetValue return the actual value of the parameter
+//GetValue return the actual Value of the parameter
 func (p *Parameter) GetValue() string {
-	if p.ssmParameter.Value == nil {
+	if p.Value == nil {
 		return ""
 	}
-	return *p.ssmParameter.Value
+	return *p.Value
 }
 
 //NewParameters creates a Parameters
