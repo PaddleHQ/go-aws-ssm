@@ -15,11 +15,6 @@ type ParameterStore struct {
 	ssm ssmClient
 }
 
-//SetSSM sets a new ssm client
-func (c *ParameterStore) SetSSM(ssm ssmClient) {
-	c.ssm = ssm
-}
-
 //GetAllParametersByPath is returning all the Parameters that are hierarchy linked to this path
 //For example a request with path as /my-service/dev/
 //Will return /my-service/dev/param-a, /my-service/dev/param-b, etc... but will not return recursive paths
@@ -47,31 +42,17 @@ func (c *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*Pa
 	return parameters, nil
 }
 
-var defaultSessionOptions = session.Options{
-	Config:            aws.Config{Region: aws.String("us-east-1")},
-	SharedConfigState: session.SharedConfigEnable,
+//NewParameterStoreWithClient is creating a new ParameterStore with the given ssm Client
+func NewParameterStoreWithClient(client ssmClient) *ParameterStore {
+	return &ParameterStore{ssm: client}
 }
 
-//NewParameterStoreWithOptions is creating a new parameterstore ParameterStore with the specified Session options
-func NewParameterStoreWithOptions(sessionOptions *session.Options, ssmConfig ...*aws.Config) (*ParameterStore, error) {
-	options := defaultSessionOptions
-	if sessionOptions != nil {
-		options = *sessionOptions
-	}
-	sessionAWS, err := session.NewSessionWithOptions(options)
-	if err != nil {
-		return nil, err
-	}
-	svc := ssm.New(sessionAWS, ssmConfig...)
-	return &ParameterStore{ssm: svc}, nil
-}
-
-//NewParameterStore is creating a new parameterstore ParameterStore
+//NewParameterStore is creating a new ParameterStore by creating an AWS Session
 func NewParameterStore(ssmConfig ...*aws.Config) (*ParameterStore, error) {
-	sessionAWS, err := session.NewSessionWithOptions(defaultSessionOptions)
+	sessionAWS, err := session.NewSession(ssmConfig...)
 	if err != nil {
 		return nil, err
 	}
-	svc := ssm.New(sessionAWS, ssmConfig...)
+	svc := ssm.New(sessionAWS)
 	return &ParameterStore{ssm: svc}, nil
 }
