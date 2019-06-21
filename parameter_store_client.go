@@ -1,13 +1,23 @@
 package awsssm
 
 import (
+	"errors"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
+var (
+	//ErrParameterNotFound error for when the requested Parameter Store parameter can't be found
+	ErrParameterNotFound = errors.New("parameter not found")
+	//ErrParameterInvalidName error for invalid parameter name
+	ErrParameterInvalidName = errors.New("invalid parameter name")
+)
+
 type ssmClient interface {
 	GetParametersByPath(input *ssm.GetParametersByPathInput) (*ssm.GetParametersByPathOutput, error)
+	GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error)
 }
 
 //ParameterStore holds all the methods tha are supported against AWS Parameter Store
@@ -15,20 +25,21 @@ type ParameterStore struct {
 	ssm ssmClient
 }
 
+
 //GetAllParametersByPath is returning all the Parameters that are hierarchy linked to this path
 //For example a request with path as /my-service/dev/
 //Will return /my-service/dev/param-a, /my-service/dev/param-b, etc... but will not return recursive paths
 //the `ssm:GetAllParametersByPath` permission is required
-//to the `arn:aws:ssm:us-east-2:aws-account-id:/my-service/dev/*`
-func (c *ParameterStore) GetAllParametersByPath(path string, decrypt bool) (*Parameters, error) {
+//to the `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/*`
+func (ps *ParameterStore) GetAllParametersByPath(path string, decrypt bool) (*Parameters, error) {
 	var input = &ssm.GetParametersByPathInput{}
 	input.SetWithDecryption(decrypt)
 	input.SetPath(path)
-	return c.getParameters(input)
+	return ps.getParameters(input)
 }
 
-func (c *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*Parameters, error) {
-	result, err := c.ssm.GetParametersByPath(input)
+func (ps *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*Parameters, error) {
+	result, err := ps.ssm.GetParametersByPath(input)
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +51,33 @@ func (c *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*Pa
 		parameters.parameters[*v.Name] = &Parameter{Value: v.Value}
 	}
 	return parameters, nil
+}
+
+//GetParameter is returning tha parameter with the given name
+//For example a request with name as /my-service/dev/param-1
+//Will return the parameter value if exists or ErrParameterInvalidName is parameter cannot be found
+//The `ssm:GetParameter` permission is required
+//to the `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
+func (ps *ParameterStore) GetParameter(name string, decrypted bool) (*Parameter, error) {
+	if name == "" {
+		return nil, ErrParameterInvalidName
+	}
+	input := &ssm.GetParameterInput{}
+	input.SetName(name)
+	input.SetWithDecryption(decrypted)
+	return ps.getParameter(input)
+}
+func (ps *ParameterStore) getParameter(input *ssm.GetParameterInput) (*Parameter, error) {
+	result, err := ps.ssm.GetParameter(input)
+	if err != nil {
+		if awsError, ok := err.(awserr.Error); ok && awsError.Code() == ssm.ErrCodeParameterNotFound {
+			return nil, ErrParameterNotFound
+		}
+		return nil, err
+	}
+	return &Parameter{
+		Value: result.Parameter.Value,
+	}, nil
 }
 
 //NewParameterStoreWithClient is creating a new ParameterStore with the given ssm Client
