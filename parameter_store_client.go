@@ -53,9 +53,9 @@ func (ps *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*P
 	return parameters, nil
 }
 
-//GetParameter is returning tha parameter with the given name
+//GetParameter is returning the parameter with the given name
 //For example a request with name as /my-service/dev/param-1
-//Will return the parameter value if exists or ErrParameterInvalidName is parameter cannot be found
+//Will return the parameter value if exists or ErrParameterInvalidName if parameter cannot be found
 //The `ssm:GetParameter` permission is required
 //to the `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
 func (ps *ParameterStore) GetParameter(name string, decrypted bool) (*Parameter, error) {
