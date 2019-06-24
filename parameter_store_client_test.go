@@ -2,6 +2,7 @@ package awsssm
 
 import (
 	"errors"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/ssm"
 	"reflect"
 	"testing"
@@ -22,10 +23,16 @@ var errSSM = errors.New("ssm request error")
 type stubSSMClient struct {
 	GetParametersByPathOutput *ssm.GetParametersByPathOutput
 	GetParametersByPathError  error
+	GetParameterOutput        *ssm.GetParameterOutput
+	GetParameterError         error
 }
 
 func (s stubSSMClient) GetParametersByPath(input *ssm.GetParametersByPathInput) (*ssm.GetParametersByPathOutput, error) {
 	return s.GetParametersByPathOutput, s.GetParametersByPathError
+}
+
+func (s stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
+	return s.GetParameterOutput, s.GetParameterError
 }
 
 func TestClient_GetParametersByPath(t *testing.T) {
@@ -80,5 +87,56 @@ func TestClient_GetParametersByPath(t *testing.T) {
 func getParameters() []*ssm.Parameter {
 	return []*ssm.Parameter{
 		param1, param2,
+	}
+}
+
+func TestParameterStore_GetParameter(t *testing.T) {
+	value := "something-secure"
+	tests := []struct {
+		name           string
+		ssmClient      ssmClient
+		parameterName  string
+		expectedError  error
+		expectedOutput *Parameter
+	}{
+		{
+			name: "Success",
+			ssmClient: &stubSSMClient{
+				GetParameterOutput: &ssm.GetParameterOutput{
+					Parameter: param1,
+				},
+			},
+			parameterName: "/my-service/dev/DB_PASSWORD",
+			expectedOutput: &Parameter{
+				Value: &value,
+			},
+		},
+		{
+			name:          "Failed Empty name",
+			ssmClient:     &stubSSMClient{},
+			parameterName: "",
+			expectedError: ErrParameterInvalidName,
+		},
+		{
+			name: "Failed Parameter Not Found",
+			ssmClient: &stubSSMClient{
+				GetParameterError: awserr.New(ssm.ErrCodeParameterNotFound, "parameter not found", nil),
+			},
+			parameterName: "/my-service/dev/NOT_FOUND",
+			expectedError: ErrParameterNotFound,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+
+			client := NewParameterStoreWithClient(test.ssmClient)
+			parameter, err := client.GetParameter(test.parameterName, true)
+			if err != test.expectedError {
+				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
+			}
+			if !reflect.DeepEqual(parameter, test.expectedOutput) {
+				t.Error(`Unexpected parameter`, *parameter, *test.expectedOutput)
+			}
+		})
 	}
 }
