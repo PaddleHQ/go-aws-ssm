@@ -1,5 +1,11 @@
 # go-aws-ssm
-Client library that interfaces with AWS System Manager Agent
+Go package that interfaces with [AWS System Manager](https://www.amazonaws.cn/en/systems-manager/).
+
+## Why to use go-aws-ssm and not the aws-sdk-go?
+This package is wrapping the aws-sdk-go and hides the complexity dealing with the not so Go friendly AWS SDK.
+Perfect use case for this package is when secure parameters for an application are stored to 
+[AWS Parameter Store](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html)
+using a path hierarchy. During application startup you can use this package to fetch them and use them in your application.
 
 ## Install
 
@@ -32,7 +38,7 @@ go get github.com/PaddleHQ/go-aws-ssm
     	
 ```
 
-#### Integrates easy with [viper](https://github.com/spf13/viper)
+#### Integrates easily with [viper](https://github.com/spf13/viper)
 ```go
         //Assuming you have the parameters in the following format:
      	//my-service/dev/param-1  -> with value `a`
