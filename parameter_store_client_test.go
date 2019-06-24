@@ -65,8 +65,7 @@ func TestClient_GetParametersByPath(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 
-			client := new(ParameterStore)
-			client.SetSSM(test.ssmClient)
+			client := NewParameterStoreWithClient(test.ssmClient)
 			parameters, err := client.GetAllParametersByPath(test.path, true)
 			if err != test.expectedError {
 				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
