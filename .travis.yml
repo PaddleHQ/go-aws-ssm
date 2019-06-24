@@ -1,0 +1,20 @@
+language: go
+
+go:
+  - "1.12.x"
+
+env:
+  - GO111MODULE=on
+
+before_install:
+  - curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.17.1
+
+install:
+  - go mod download
+
+script:
+  - go test ./... -v -coverprofile coverage.txt -covermode count -coverpkg ./...
+  - golangci-lint run ./...
+
+after_script:
+  - bash <(curl -s https://codecov.io/bash)
