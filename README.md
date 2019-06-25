@@ -26,7 +26,7 @@ go get github.com/PaddleHQ/go-aws-ssm
     		return err
     	}
     	//Requesting the base path
-    	params, err := pmstore.GetAllParametersByPath("/my-service/dev/")
+    	params, err := pmstore.GetAllParametersByPath("/my-service/dev/", true)
     	if err!=nil{
     		return err
     	}
@@ -48,7 +48,7 @@ go get github.com/PaddleHQ/go-aws-ssm
      		return err
      	}
      	//Requesting the base path
-     	params, err := pmstore.GetAllParametersByPath("/my-service/dev/")
+     	params, err := pmstore.GetAllParametersByPath("/my-service/dev/", true)
      	if err!=nil{
      		return err
      	}
