@@ -1,3 +1,8 @@
+[![Build Status](https://travis-ci.com/PaddleHQ/go-aws-ssm.svg?branch=master)](https://travis-ci.com/PaddleHQ/go-aws-ssm)
+[![codecov](https://codecov.io/gh/PaddleHQ/go-aws-ssm/branch/master/graph/badge.svg)](https://codecov.io/gh/PaddleHQ/go-aws-ssm)
+[![Go Report Card](https://goreportcard.com/badge/github.com/PaddleHQ/go-aws-ssm)](https://goreportcard.com/report/github.com/PaddleHQ/go-aws-ssm)
+[![GoDoc](https://godoc.org/github.com/PaddleHQ/go-aws-ssm?status.svg)](https://godoc.org/github.com/PaddleHQ/go-aws-ssm)
+
 # go-aws-ssm
 Go package that interfaces with [AWS System Manager](https://www.amazonaws.cn/en/systems-manager/).
 

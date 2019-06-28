@@ -25,7 +25,6 @@ type ParameterStore struct {
 	ssm ssmClient
 }
 
-
 //GetAllParametersByPath is returning all the Parameters that are hierarchy linked to this path
 //For example a request with path as /my-service/dev/
 //Will return /my-service/dev/param-a, /my-service/dev/param-b, etc... but will not return recursive paths
