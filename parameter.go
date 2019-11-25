@@ -77,3 +77,8 @@ func (p *Parameters) getKeyValueMap() map[string]string {
 	}
 	return keyValue
 }
+
+// GetAllValues gets map with all parameters values.
+func (p *Parameters) GetAllValues() map[string]string {
+	return p.getKeyValueMap()
+}
