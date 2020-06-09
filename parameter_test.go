@@ -132,10 +132,10 @@ func TestParameters_Read(t *testing.T) {
 			expectedByteCount: 70,
 		},
 		{
-			name: "ReadFrom Large Byte Count",
-			basePath: "/my-service/dev",
-			parameters: getRandomParametersMap(1000, 10),
-			expectedError: nil,
+			name:              "ReadFrom Large Byte Count",
+			basePath:          "/my-service/dev",
+			parameters:        getRandomParametersMap(1000, 10),
+			expectedError:     nil,
 			expectedByteCount: 33001,
 		},
 	}
