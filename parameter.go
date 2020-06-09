@@ -31,17 +31,29 @@ func NewParameters(basePath string, parameters map[string]*Parameter) *Parameter
 
 //Parameters holds the output and all AWS Parameter Store that have the same base path
 type Parameters struct {
+	i          int64 // read index
+	bytesJSON  []byte
 	basePath   string
 	parameters map[string]*Parameter
 }
 
 //Read implements the io.Reader interface for the key/value pair
 func (p *Parameters) Read(des []byte) (n int, err error) {
-	bytesJSON, err := json.Marshal(p.getKeyValueMap())
-	if err != nil {
-		return 0, err
+	if p.bytesJSON == nil {
+		p.bytesJSON, err = json.Marshal(p.getKeyValueMap())
+		if err != nil {
+			return 0, err
+		}
 	}
-	return copy(des, bytesJSON), io.EOF
+
+	if p.i >= int64(len(p.bytesJSON)) {
+		return 0, io.EOF
+	}
+
+	n = copy(des, p.bytesJSON[p.i:])
+	p.i += int64(n)
+
+	return n, nil
 }
 
 //GetValueByName returns the value based on the name
