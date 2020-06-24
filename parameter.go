@@ -31,7 +31,7 @@ func NewParameters(basePath string, parameters map[string]*Parameter) *Parameter
 
 //Parameters holds the output and all AWS Parameter Store that have the same base path
 type Parameters struct {
-	i          int64 // read index
+	readIndex  int64
 	bytesJSON  []byte
 	basePath   string
 	parameters map[string]*Parameter
@@ -46,12 +46,13 @@ func (p *Parameters) Read(des []byte) (n int, err error) {
 		}
 	}
 
-	if p.i >= int64(len(p.bytesJSON)) {
+	if p.readIndex >= int64(len(p.bytesJSON)) {
+		p.readIndex = 0
 		return 0, io.EOF
 	}
 
-	n = copy(des, p.bytesJSON[p.i:])
-	p.i += int64(n)
+	n = copy(des, p.bytesJSON[p.readIndex:])
+	p.readIndex += int64(n)
 
 	return n, nil
 }
