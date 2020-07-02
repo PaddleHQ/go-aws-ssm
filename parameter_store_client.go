@@ -2,6 +2,7 @@ package awsssm
 
 import (
 	"errors"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -18,6 +19,7 @@ var (
 type ssmClient interface {
 	GetParametersByPath(input *ssm.GetParametersByPathInput) (*ssm.GetParametersByPathOutput, error)
 	GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error)
+	PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error)
 }
 
 //ParameterStore holds all the methods tha are supported against AWS Parameter Store
@@ -77,6 +79,27 @@ func (ps *ParameterStore) getParameter(input *ssm.GetParameterInput) (*Parameter
 	return &Parameter{
 		Value: result.Parameter.Value,
 	}, nil
+}
+
+func (ps *ParameterStore) PutSecureParameter(name string, kmsID string) error {
+	if name == "" {
+		return ErrParameterInvalidName
+	}
+	input := &ssm.PutParameterInput{}
+	input.SetName(name)
+	input.SetType("SecureString")
+	if kmsID != "" {
+		input.SetKeyId(kmsID)
+	}
+
+	return ps.putParameter(input)
+}
+func (ps *ParameterStore) putParameter(input *ssm.PutParameterInput) error {
+	_, err := ps.ssm.PutParameter(input)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 //NewParameterStoreWithClient is creating a new ParameterStore with the given ssm Client

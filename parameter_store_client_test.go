@@ -2,10 +2,11 @@ package awsssm
 
 import (
 	"errors"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/ssm"
 	"reflect"
 	"testing"
+
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
 var param1 = new(ssm.Parameter).
@@ -33,6 +34,12 @@ func (s stubSSMClient) GetParametersByPath(input *ssm.GetParametersByPathInput) 
 
 func (s stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
 	return s.GetParameterOutput, s.GetParameterError
+}
+
+// we don't really use this because there isn't much to actually test for PutParameter
+// it accepts an input and either returns an error or nil--that's it
+func (s stubSSMClient) PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error) {
+  return nil, nil
 }
 
 func TestClient_GetParametersByPath(t *testing.T) {
