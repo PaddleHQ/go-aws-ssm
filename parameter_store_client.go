@@ -81,7 +81,13 @@ func (ps *ParameterStore) getParameter(input *ssm.GetParameterInput) (*Parameter
 	}, nil
 }
 
-func (ps *ParameterStore) PutSecureParameter(name, value, kmsID string) error {
+func (ps *ParameterStore) PutSecureParameter(name, value string, overwrite bool) error {
+  return ps.putSecureParameterWrapper(name, value, "", overwrite)
+}
+func (ps *ParameterStore) PutSecureParameterWithCMK(name, value string, overwrite bool, kmsID string) error {
+  return ps.putSecureParameterWrapper(name, value, kmsID, overwrite)
+}
+func (ps *ParameterStore) putSecureParameterWrapper(name, value, kmsID string, overwrite bool) error {
 	if name == "" {
 		return ErrParameterInvalidName
 	}
@@ -92,6 +98,7 @@ func (ps *ParameterStore) PutSecureParameter(name, value, kmsID string) error {
 	if kmsID != "" {
 		input.SetKeyId(kmsID)
 	}
+  input.SetOverwrite(overwrite)
 
   if err := input.Validate(); err != nil {
     return err

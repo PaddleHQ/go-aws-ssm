@@ -38,8 +38,8 @@ func (s stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParam
 	return s.GetParameterOutput, s.GetParameterError
 }
 
-// we don't really use this because there isn't much to actually test for PutParameter
-// it accepts an input and either returns an error or nil--that's it
+// we return nothing becuase the actual response is pretty boring. Just a version number. We DO
+// want to track was is input because there is a _little_ business logic around that
 func (s stubSSMClient) PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error) {
 	putParameterInputReceived = *input
 	return nil, nil
@@ -154,13 +154,80 @@ func TestParameterStore_GetParameter(t *testing.T) {
 func TestParameterStore_PutSecureParameter(t *testing.T) {
 	paramName := "foo"
 	paramValue := "baz"
-	kmsId := "bar"
 	paramType := "SecureString"
+	overwriteTrue := true
+	overwriteFalse := false
 	tests := []struct {
 		name           string
 		ssmClient      ssmClient
 		parameterName  string
 		parameterValue string
+		overwrite      bool
+		expectedError  error
+		expectedOutput ssm.PutParameterInput
+	}{
+		{
+			name:           "Failed Empty name",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  "",
+			parameterValue: "",
+			expectedError:  ErrParameterInvalidName,
+		},
+		{
+			name:           "Set Correct Defaults",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  paramName,
+			parameterValue: paramValue,
+			expectedOutput: ssm.PutParameterInput{
+				Name:      &paramName,
+				Type:      &paramType,
+				Value:     &paramValue,
+				Overwrite: &overwriteFalse,
+			},
+		},
+		{
+			name:           "Overwrite Changes Propagate",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  paramName,
+			parameterValue: paramValue,
+			overwrite:      overwriteTrue,
+			expectedOutput: ssm.PutParameterInput{
+				Name:      &paramName,
+				Type:      &paramType,
+				Value:     &paramValue,
+				Overwrite: &overwriteTrue,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// make sure we reset the mock input tracker
+			putParameterInputReceived = ssm.PutParameterInput{}
+
+			client := NewParameterStoreWithClient(test.ssmClient)
+			err := client.PutSecureParameter(test.parameterName, test.parameterValue, test.overwrite)
+			if err != test.expectedError {
+				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
+			}
+			if !reflect.DeepEqual(putParameterInputReceived, test.expectedOutput) {
+				t.Error(`Unexpected parameter`, putParameterInputReceived, test.expectedOutput)
+			}
+		})
+	}
+}
+
+func TestParameterStore_PutSecureParameterWithCMK(t *testing.T) {
+	paramName := "foo"
+	paramValue := "baz"
+	paramType := "SecureString"
+	overwriteFalse := false
+	kmsID := "super-secret-kms"
+	tests := []struct {
+		name           string
+		ssmClient      ssmClient
+		parameterName  string
+		parameterValue string
+		overwrite      bool
 		kmsID          string
 		expectedError  error
 		expectedOutput ssm.PutParameterInput
@@ -178,31 +245,34 @@ func TestParameterStore_PutSecureParameter(t *testing.T) {
 			parameterName:  paramName,
 			parameterValue: paramValue,
 			expectedOutput: ssm.PutParameterInput{
-				Name:  &paramName,
-				KeyId: nil,
-				Type:  &paramType,
-				Value: &paramValue,
+				Name:      &paramName,
+				Overwrite: &overwriteFalse,
+				Type:      &paramType,
+				Value:     &paramValue,
 			},
 		},
 		{
-			name:           "Set Correct KMS ID",
+			name:           "KMS ID Changes Propagate",
 			ssmClient:      &stubSSMClient{},
 			parameterName:  paramName,
 			parameterValue: paramValue,
-			kmsID:          kmsId,
+			kmsID:          kmsID,
 			expectedOutput: ssm.PutParameterInput{
-				Name:  &paramName,
-				KeyId: &kmsId,
-				Type:  &paramType,
-				Value: &paramValue,
+				KeyId:     &kmsID,
+				Name:      &paramName,
+				Overwrite: &overwriteFalse,
+				Type:      &paramType,
+				Value:     &paramValue,
 			},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// make sure we reset the mock input tracker
+			putParameterInputReceived = ssm.PutParameterInput{}
 
 			client := NewParameterStoreWithClient(test.ssmClient)
-			err := client.PutSecureParameter(test.parameterName, test.parameterValue, test.kmsID)
+			err := client.PutSecureParameterWithCMK(test.parameterName, test.parameterValue, test.overwrite, test.kmsID)
 			if err != test.expectedError {
 				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
 			}
@@ -213,11 +283,3 @@ func TestParameterStore_PutSecureParameter(t *testing.T) {
 	}
 }
 
-//func TestParameterStore_PutSecureParameter_SetsSecureStringType(t *testing.T) {
-//}
-
-//func TestParameterStore_PutSecureParameter_PassesKMSIDIfNotEmpty(t *testing.T) {
-//}
-
-//func TestParameterStore_PutSecureParameter_DoesNotPassKMSIDIfEmpty(t *testing.T) {
-//}
