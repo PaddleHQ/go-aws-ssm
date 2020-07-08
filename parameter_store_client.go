@@ -32,21 +32,33 @@ type ParameterStore struct {
 //Will return /my-service/dev/param-a, /my-service/dev/param-b, etc... but will not return recursive paths
 //the `ssm:GetAllParametersByPath` permission is required
 //to the `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/*`
+//
+//This will also page through and return all elements in the hierarchy, non-recursively
 func (ps *ParameterStore) GetAllParametersByPath(path string, decrypt bool) (*Parameters, error) {
 	var input = &ssm.GetParametersByPathInput{}
 	input.SetWithDecryption(decrypt)
 	input.SetPath(path)
-  input.SetRecursive(true)
+  input.SetMaxResults(10)
 	return ps.getParameters(input)
 }
 
 func (ps *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*Parameters, error) {
-	result, err := ps.ssm.GetParametersByPath(input)
-	if err != nil {
-		return nil, err
-	}
-	parameters := NewParameters(*input.Path, make(map[string]*Parameter, len(result.Parameters)))
-	for _, v := range result.Parameters {
+  allParams := make([]*ssm.Parameter, 0)
+  for {
+    result, err := ps.ssm.GetParametersByPath(input)
+    if err != nil {
+      return nil, err
+    }
+    allParams = append(allParams, result.Parameters...)
+
+    if result.NextToken != nil {
+      input.SetNextToken(*result.NextToken)
+    } else {
+      break
+    }
+  }
+	parameters := NewParameters(*input.Path, make(map[string]*Parameter, len(allParams)))
+	for _, v := range allParams {
 		if v.Name == nil {
 			continue
 		}
