@@ -21,6 +21,8 @@ var param2 = new(ssm.Parameter).
 
 var errSSM = errors.New("ssm request error")
 
+var putParameterInputReceived ssm.PutParameterInput
+
 type stubSSMClient struct {
 	GetParametersByPathOutput *ssm.GetParametersByPathOutput
 	GetParametersByPathError  error
@@ -39,7 +41,8 @@ func (s stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParam
 // we don't really use this because there isn't much to actually test for PutParameter
 // it accepts an input and either returns an error or nil--that's it
 func (s stubSSMClient) PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error) {
-  return nil, nil
+	putParameterInputReceived = *input
+	return nil, nil
 }
 
 func TestClient_GetParametersByPath(t *testing.T) {
@@ -147,3 +150,74 @@ func TestParameterStore_GetParameter(t *testing.T) {
 		})
 	}
 }
+
+func TestParameterStore_PutSecureParameter(t *testing.T) {
+	paramName := "foo"
+	paramValue := "baz"
+	kmsId := "bar"
+	paramType := "SecureString"
+	tests := []struct {
+		name           string
+		ssmClient      ssmClient
+		parameterName  string
+		parameterValue string
+		kmsID          string
+		expectedError  error
+		expectedOutput ssm.PutParameterInput
+	}{
+		{
+			name:           "Failed Empty name",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  "",
+			parameterValue: "",
+			expectedError:  ErrParameterInvalidName,
+		},
+		{
+			name:           "Set Correct Defaults",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  paramName,
+			parameterValue: paramValue,
+			expectedOutput: ssm.PutParameterInput{
+				Name:  &paramName,
+				KeyId: nil,
+				Type:  &paramType,
+				Value: &paramValue,
+			},
+		},
+		{
+			name:           "Set Correct KMS ID",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  paramName,
+			parameterValue: paramValue,
+			kmsID:          kmsId,
+			expectedOutput: ssm.PutParameterInput{
+				Name:  &paramName,
+				KeyId: &kmsId,
+				Type:  &paramType,
+				Value: &paramValue,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+
+			client := NewParameterStoreWithClient(test.ssmClient)
+			err := client.PutSecureParameter(test.parameterName, test.parameterValue, test.kmsID)
+			if err != test.expectedError {
+				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
+			}
+			if !reflect.DeepEqual(putParameterInputReceived, test.expectedOutput) {
+				t.Error(`Unexpected parameter`, putParameterInputReceived, test.expectedOutput)
+			}
+		})
+	}
+}
+
+//func TestParameterStore_PutSecureParameter_SetsSecureStringType(t *testing.T) {
+//}
+
+//func TestParameterStore_PutSecureParameter_PassesKMSIDIfNotEmpty(t *testing.T) {
+//}
+
+//func TestParameterStore_PutSecureParameter_DoesNotPassKMSIDIfEmpty(t *testing.T) {
+//}

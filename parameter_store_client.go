@@ -81,22 +81,30 @@ func (ps *ParameterStore) getParameter(input *ssm.GetParameterInput) (*Parameter
 	}, nil
 }
 
-func (ps *ParameterStore) PutSecureParameter(name string, kmsID string) error {
+func (ps *ParameterStore) PutSecureParameter(name, value, kmsID string) error {
 	if name == "" {
 		return ErrParameterInvalidName
 	}
 	input := &ssm.PutParameterInput{}
 	input.SetName(name)
 	input.SetType("SecureString")
+  input.SetValue(value)
 	if kmsID != "" {
 		input.SetKeyId(kmsID)
 	}
+
+  if err := input.Validate(); err != nil {
+    return err
+  }
 
 	return ps.putParameter(input)
 }
 func (ps *ParameterStore) putParameter(input *ssm.PutParameterInput) error {
 	_, err := ps.ssm.PutParameter(input)
 	if err != nil {
+    if awsError, ok := err.(awserr.Error); ok && awsError.Code() == ssm.ErrCodeParameterNotFound {
+			return ErrParameterNotFound
+		}
 		return err
 	}
 	return nil
