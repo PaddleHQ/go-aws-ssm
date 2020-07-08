@@ -38,7 +38,7 @@ func (ps *ParameterStore) GetAllParametersByPath(path string, decrypt bool) (*Pa
 	input.SetPath(path)
   // yes, this is hard-coded, but if you have a directory of more than 100 records, maybe you 
   // should think about re-organizing :)
-  input.SetMaxResults(100)
+  input.SetMaxResults(50)
 	return ps.getParameters(input)
 }
 
