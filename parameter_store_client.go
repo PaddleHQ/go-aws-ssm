@@ -36,9 +36,7 @@ func (ps *ParameterStore) GetAllParametersByPath(path string, decrypt bool) (*Pa
 	var input = &ssm.GetParametersByPathInput{}
 	input.SetWithDecryption(decrypt)
 	input.SetPath(path)
-  // yes, this is hard-coded, but if you have a directory of more than 100 records, maybe you 
-  // should think about re-organizing :)
-  input.SetMaxResults(50)
+  input.SetRecursive(true)
 	return ps.getParameters(input)
 }
 
