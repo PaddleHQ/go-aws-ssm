@@ -1,4 +1,4 @@
-module github.com/PaddleHQ/go-aws-ssm
+module github.com/zwisdom-NTST/go-aws-ssm
 
 go 1.12
 
