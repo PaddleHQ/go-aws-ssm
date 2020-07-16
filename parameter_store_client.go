@@ -39,15 +39,27 @@ func (ps *ParameterStore) GetAllParametersByPath(path string, decrypt bool) (*Pa
 
 func (ps *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*Parameters, error) {
 	result, err := ps.ssm.GetParametersByPath(input)
+	hasNext := true
 	if err != nil {
 		return nil, err
 	}
 	parameters := NewParameters(*input.Path, make(map[string]*Parameter, len(result.Parameters)))
-	for _, v := range result.Parameters {
-		if v.Name == nil {
-			continue
+	for hasNext {
+		for _, v := range result.Parameters {
+			if v.Name == nil {
+				continue
+			}
+			parameters.parameters[*v.Name] = &Parameter{Value: v.Value}
 		}
-		parameters.parameters[*v.Name] = &Parameter{Value: v.Value}
+		if result.NextToken != nil{
+			input.NextToken = result.NextToken
+			result, err = ps.ssm.GetParametersByPath(input)
+			if err != nil {
+				return nil, err
+			}
+		}else{
+			hasNext = false
+		}
 	}
 	return parameters, nil
 }
