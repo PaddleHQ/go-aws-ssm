@@ -18,17 +18,35 @@ var param2 = new(ssm.Parameter).
 	SetValue("rds.something.aws.com").
 	SetARN("arn:aws:ssm:us-east-2:aws-account-id:/my-service/dev/DB_HOST")
 
+var param3 = new(ssm.Parameter).
+	SetName("/my-service/dev/DB_USERNAME").
+	SetValue("username").
+	SetARN("arn:aws:ssm:us-east-2:aws-account-id:/my-service/dev/DB_USERNAME")
+
 var errSSM = errors.New("ssm request error")
 
-type stubSSMClient struct {
-	GetParametersByPathOutput *ssm.GetParametersByPathOutput
-	GetParametersByPathError  error
-	GetParameterOutput        *ssm.GetParameterOutput
-	GetParameterError         error
+type stubGetParametersByPathOutput struct {
+	Output         ssm.GetParametersByPathOutput
+	MoreParamsLeft bool
 }
 
-func (s stubSSMClient) GetParametersByPath(input *ssm.GetParametersByPathInput) (*ssm.GetParametersByPathOutput, error) {
-	return s.GetParametersByPathOutput, s.GetParametersByPathError
+type stubSSMClient struct {
+	GetParametersByPathOutput        []stubGetParametersByPathOutput
+	GetParametersByPathError         error
+	GetParameterOutput               *ssm.GetParameterOutput
+	GetParameterError                error
+}
+
+func (s stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error {
+	if s.GetParametersByPathError == nil {
+		for _, output := range s.GetParametersByPathOutput {
+			done := fn(&output.Output, output.MoreParamsLeft)
+			if done {
+				return nil
+			}
+		}
+	}
+	return s.GetParametersByPathError
 }
 
 func (s stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
@@ -46,8 +64,21 @@ func TestClient_GetParametersByPath(t *testing.T) {
 		{
 			name: "Success",
 			ssmClient: &stubSSMClient{
-				GetParametersByPathOutput: &ssm.GetParametersByPathOutput{
-					Parameters: getParameters(),
+				GetParametersByPathOutput: []stubGetParametersByPathOutput{
+					{
+						MoreParamsLeft: true,
+						Output: ssm.GetParametersByPathOutput{
+							Parameters: getParameters(),
+						},
+					},
+					{
+						MoreParamsLeft: false,
+						Output: ssm.GetParametersByPathOutput{
+							Parameters: []*ssm.Parameter{
+								param3,
+							},
+						},
+					},
 				},
 			},
 			path: "/my-service/dev/",
@@ -56,6 +87,7 @@ func TestClient_GetParametersByPath(t *testing.T) {
 				parameters: map[string]*Parameter{
 					"/my-service/dev/DB_PASSWORD": {Value: param1.Value},
 					"/my-service/dev/DB_HOST":     {Value: param2.Value},
+					"/my-service/dev/DB_USERNAME": {Value: param3.Value},
 				},
 			},
 		},
