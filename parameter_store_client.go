@@ -85,9 +85,22 @@ func (ps *ParameterStore) getParameter(input *ssm.GetParameterInput) (*Parameter
 	}, nil
 }
 
+//PutSecureParameter is setting the parameter with the given name to a passed in value.
+//Allow overwriting the value of the parameter already exists, otherwise an error is returned
+//For example a request with name as '/my-service/dev/param-1':
+//Will set the parameter value if exists or ErrParameterInvalidName if parameter already exists or is empty
+// and `overwrite` is false. The `ssm:PutParameter` permission is required to the
+//`arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
 func (ps *ParameterStore) PutSecureParameter(name, value string, overwrite bool) error {
 	return ps.putSecureParameterWrapper(name, value, "", overwrite)
 }
+
+//PutSecureParameterWithCMK is the same as PutSecureParameter but with a passed in CMK (Customer Master Key)
+//For example a request with name as '/my-service/dev/param-1' and a `kmsID` of 'foo':
+//Will set the parameter value if exists or ErrParameterInvalidName if parameter already exists or is empty
+// and `overwrite` is false. The `ssm:PutParameter` permission is required to the
+//`arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
+// The `kms:Encrypt` permission is required to the `arn:aws:kms:us-east-1:710015040892:key/foo`
 func (ps *ParameterStore) PutSecureParameterWithCMK(name, value string, overwrite bool, kmsID string) error {
 	return ps.putSecureParameterWrapper(name, value, kmsID, overwrite)
 }
