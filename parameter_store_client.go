@@ -17,7 +17,7 @@ var (
 )
 
 type ssmClient interface {
-	GetParametersByPath(input *ssm.GetParametersByPathInput) (*ssm.GetParametersByPathOutput, error)
+	GetParametersByPathPages(input *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error
 	GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error)
 	PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error)
 }
@@ -38,31 +38,22 @@ func (ps *ParameterStore) GetAllParametersByPath(path string, decrypt bool) (*Pa
 	var input = &ssm.GetParametersByPathInput{}
 	input.SetWithDecryption(decrypt)
 	input.SetPath(path)
-  input.SetMaxResults(10)
+	input.SetMaxResults(10)
 	return ps.getParameters(input)
 }
 
 func (ps *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*Parameters, error) {
-  allParams := make([]*ssm.Parameter, 0)
-  for {
-    result, err := ps.ssm.GetParametersByPath(input)
-    if err != nil {
-      return nil, err
-    }
-    allParams = append(allParams, result.Parameters...)
-
-    if result.NextToken != nil {
-      input.SetNextToken(*result.NextToken)
-    } else {
-      break
-    }
-  }
-	parameters := NewParameters(*input.Path, make(map[string]*Parameter, len(allParams)))
-	for _, v := range allParams {
-		if v.Name == nil {
-			continue
+	parameters := NewParameters(*input.Path, make(map[string]*Parameter))
+	if err := ps.ssm.GetParametersByPathPages(input, func(result *ssm.GetParametersByPathOutput, b bool) bool {
+		for _, v := range result.Parameters {
+			if v.Name == nil {
+				continue
+			}
+			parameters.parameters[*v.Name] = &Parameter{Value: v.Value}
 		}
-		parameters.parameters[*v.Name] = &Parameter{Value: v.Value}
+		return !b
+	}); err != nil {
+		return nil, err
 	}
 	return parameters, nil
 }
@@ -95,10 +86,10 @@ func (ps *ParameterStore) getParameter(input *ssm.GetParameterInput) (*Parameter
 }
 
 func (ps *ParameterStore) PutSecureParameter(name, value string, overwrite bool) error {
-  return ps.putSecureParameterWrapper(name, value, "", overwrite)
+	return ps.putSecureParameterWrapper(name, value, "", overwrite)
 }
 func (ps *ParameterStore) PutSecureParameterWithCMK(name, value string, overwrite bool, kmsID string) error {
-  return ps.putSecureParameterWrapper(name, value, kmsID, overwrite)
+	return ps.putSecureParameterWrapper(name, value, kmsID, overwrite)
 }
 func (ps *ParameterStore) putSecureParameterWrapper(name, value, kmsID string, overwrite bool) error {
 	if name == "" {
@@ -107,22 +98,22 @@ func (ps *ParameterStore) putSecureParameterWrapper(name, value, kmsID string, o
 	input := &ssm.PutParameterInput{}
 	input.SetName(name)
 	input.SetType("SecureString")
-  input.SetValue(value)
+	input.SetValue(value)
 	if kmsID != "" {
 		input.SetKeyId(kmsID)
 	}
-  input.SetOverwrite(overwrite)
+	input.SetOverwrite(overwrite)
 
-  if err := input.Validate(); err != nil {
-    return err
-  }
+	if err := input.Validate(); err != nil {
+		return err
+	}
 
 	return ps.putParameter(input)
 }
 func (ps *ParameterStore) putParameter(input *ssm.PutParameterInput) error {
 	_, err := ps.ssm.PutParameter(input)
 	if err != nil {
-    if awsError, ok := err.(awserr.Error); ok && awsError.Code() == ssm.ErrCodeParameterNotFound {
+		if awsError, ok := err.(awserr.Error); ok && awsError.Code() == ssm.ErrCodeParameterNotFound {
 			return ErrParameterNotFound
 		}
 		return err

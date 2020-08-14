@@ -19,36 +19,40 @@ var param2 = new(ssm.Parameter).
 	SetValue("rds.something.aws.com").
 	SetARN("arn:aws:ssm:us-east-2:aws-account-id:/my-service/dev/DB_HOST")
 
-// second page param
+var putParameterInputReceived ssm.PutParameterInput
+
+//  return s.GetParametersByPathOutput, s.GetParametersByPathError
 var param3 = new(ssm.Parameter).
-	SetName("/my-service/dev/DB_DB").
-	SetValue("dev").
-	SetARN("arn:aws:ssm:us-east-2:aws-account-id:/my-service/dev/DB_DB")
+	SetName("/my-service/dev/DB_USERNAME").
+	SetValue("username").
+	SetARN("arn:aws:ssm:us-east-2:aws-account-id:/my-service/dev/DB_USERNAME")
 
 var errSSM = errors.New("ssm request error")
 
-var putParameterInputReceived ssm.PutParameterInput
-
-type stubSSMClient struct {
-	pageTwoNextToken                  string
-	GetParametersByPathOutput         *ssm.GetParametersByPathOutput
-	GetParametersByPathOutput_PageTwo *ssm.GetParametersByPathOutput
-	GetParametersByPathError          error
-	GetParametersByPathError_PageTwo  error
-	GetParameterOutput                *ssm.GetParameterOutput
-	GetParameterError                 error
+type stubGetParametersByPathOutput struct {
+	Output         ssm.GetParametersByPathOutput
+	MoreParamsLeft bool
 }
 
-func (s stubSSMClient) GetParametersByPath(input *ssm.GetParametersByPathInput) (*ssm.GetParametersByPathOutput, error) {
-	// return _PageTwo if the NextToken matches
-	//
-	// NOTE: This completely ignores the size of a page requested by the client,
-	// which is not how the real AWS client will work
-	if input.NextToken != nil && *input.NextToken == s.pageTwoNextToken {
-		return s.GetParametersByPathOutput_PageTwo, s.GetParametersByPathError_PageTwo
-	}
+type stubSSMClient struct {
+	pageTwoNextToken                 string
+	GetParametersByPathOutput        []stubGetParametersByPathOutput
+	GetParametersByPathError         error
+	GetParametersByPathError_PageTwo error
+	GetParameterOutput               *ssm.GetParameterOutput
+	GetParameterError                error
+}
 
-	return s.GetParametersByPathOutput, s.GetParametersByPathError
+func (s stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error {
+	if s.GetParametersByPathError == nil {
+		for _, output := range s.GetParametersByPathOutput {
+			done := fn(&output.Output, output.MoreParamsLeft)
+			if done {
+				return nil
+			}
+		}
+	}
+	return s.GetParametersByPathError
 }
 
 func (s stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
@@ -63,7 +67,6 @@ func (s stubSSMClient) PutParameter(input *ssm.PutParameterInput) (*ssm.PutParam
 }
 
 func TestClient_GetParametersByPath(t *testing.T) {
-	nextToken := "next-token"
 	tests := []struct {
 		name           string
 		ssmClient      ssmClient
@@ -74,8 +77,21 @@ func TestClient_GetParametersByPath(t *testing.T) {
 		{
 			name: "Success",
 			ssmClient: &stubSSMClient{
-				GetParametersByPathOutput: &ssm.GetParametersByPathOutput{
-					Parameters: getParameters(),
+				GetParametersByPathOutput: []stubGetParametersByPathOutput{
+					{
+						MoreParamsLeft: true,
+						Output: ssm.GetParametersByPathOutput{
+							Parameters: getParameters(),
+						},
+					},
+					{
+						MoreParamsLeft: false,
+						Output: ssm.GetParametersByPathOutput{
+							Parameters: []*ssm.Parameter{
+								param3,
+							},
+						},
+					},
 				},
 			},
 			path: "/my-service/dev/",
@@ -84,6 +100,7 @@ func TestClient_GetParametersByPath(t *testing.T) {
 				parameters: map[string]*Parameter{
 					"/my-service/dev/DB_PASSWORD": {Value: param1.Value},
 					"/my-service/dev/DB_HOST":     {Value: param2.Value},
+					"/my-service/dev/DB_USERNAME": {Value: param3.Value},
 				},
 			},
 		},
@@ -100,14 +117,26 @@ func TestClient_GetParametersByPath(t *testing.T) {
 		{
 			name: "Success For Multiple Pages",
 			ssmClient: &stubSSMClient{
-				pageTwoNextToken: nextToken,
-				GetParametersByPathOutput: &ssm.GetParametersByPathOutput{
-					NextToken:  &nextToken, // must match pageTwoNextToken two lines above
-					Parameters: getParameters(),
-				},
-				GetParametersByPathOutput_PageTwo: &ssm.GetParametersByPathOutput{
-					Parameters: []*ssm.Parameter{
-						param3,
+				GetParametersByPathOutput: []stubGetParametersByPathOutput{
+					{
+						MoreParamsLeft: true,
+						Output: ssm.GetParametersByPathOutput{
+							Parameters: getParameters(),
+						},
+					},
+          {
+						MoreParamsLeft: true,
+						Output: ssm.GetParametersByPathOutput{
+							Parameters: getParameters2(),
+						},
+					},
+					{
+						MoreParamsLeft: false,
+						Output: ssm.GetParametersByPathOutput{
+							Parameters: []*ssm.Parameter{
+								param3,
+							},
+						},
 					},
 				},
 			},
@@ -117,7 +146,7 @@ func TestClient_GetParametersByPath(t *testing.T) {
 				parameters: map[string]*Parameter{
 					"/my-service/dev/DB_PASSWORD": {Value: param1.Value},
 					"/my-service/dev/DB_HOST":     {Value: param2.Value},
-					"/my-service/dev/DB_DB":       {Value: param3.Value},
+					"/my-service/dev/DB_USERNAME": {Value: param3.Value},
 				},
 			},
 		},
@@ -141,6 +170,12 @@ func getParameters() []*ssm.Parameter {
 	return []*ssm.Parameter{
 		param1, param2,
 	}
+}
+
+func getParameters2() []*ssm.Parameter {
+  return []*ssm.Parameter{
+    param3,
+  }
 }
 
 func TestParameterStore_GetParameter(t *testing.T) {
@@ -325,4 +360,3 @@ func TestParameterStore_PutSecureParameterWithCMK(t *testing.T) {
 		})
 	}
 }
-
