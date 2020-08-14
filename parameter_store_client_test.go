@@ -124,7 +124,7 @@ func TestClient_GetParametersByPath(t *testing.T) {
 							Parameters: getParameters(),
 						},
 					},
-          {
+					{
 						MoreParamsLeft: true,
 						Output: ssm.GetParametersByPathOutput{
 							Parameters: getParameters2(),
@@ -173,9 +173,9 @@ func getParameters() []*ssm.Parameter {
 }
 
 func getParameters2() []*ssm.Parameter {
-  return []*ssm.Parameter{
-    param3,
-  }
+	return []*ssm.Parameter{
+		param3,
+	}
 }
 
 func TestParameterStore_GetParameter(t *testing.T) {
