@@ -16,7 +16,7 @@ var (
 )
 
 type ssmClient interface {
-	GetParametersByPath(input *ssm.GetParametersByPathInput) (*ssm.GetParametersByPathOutput, error)
+	GetParametersByPathPages(input *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error
 	GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error)
 }
 
@@ -34,20 +34,22 @@ func (ps *ParameterStore) GetAllParametersByPath(path string, decrypt bool) (*Pa
 	var input = &ssm.GetParametersByPathInput{}
 	input.SetWithDecryption(decrypt)
 	input.SetPath(path)
+	input.SetMaxResults(10)
 	return ps.getParameters(input)
 }
 
 func (ps *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*Parameters, error) {
-	result, err := ps.ssm.GetParametersByPath(input)
-	if err != nil {
-		return nil, err
-	}
-	parameters := NewParameters(*input.Path, make(map[string]*Parameter, len(result.Parameters)))
-	for _, v := range result.Parameters {
-		if v.Name == nil {
-			continue
+	parameters := NewParameters(*input.Path, make(map[string]*Parameter))
+	if err := ps.ssm.GetParametersByPathPages(input, func(result *ssm.GetParametersByPathOutput, b bool) bool {
+		for _, v := range result.Parameters {
+			if v.Name == nil {
+				continue
+			}
+			parameters.parameters[*v.Name] = &Parameter{Value: v.Value}
 		}
-		parameters.parameters[*v.Name] = &Parameter{Value: v.Value}
+		return !b
+	}); err != nil {
+		return nil, err
 	}
 	return parameters, nil
 }
