@@ -205,7 +205,7 @@ func TestParameterStore_PutSecureParameter(t *testing.T) {
 	overwriteFalse := false
 	tests := []struct {
 		name           string
-		ssmClient      ssmClient
+		ssmClient      *stubSSMClient
 		parameterName  string
 		parameterValue string
 		overwrite      bool
@@ -252,10 +252,8 @@ func TestParameterStore_PutSecureParameter(t *testing.T) {
 			if err != test.expectedError {
 				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
 			}
-			fullStubClient := test.ssmClient.(*stubSSMClient)
-			fmt.Printf("fullStubClient: %+v", fullStubClient)
-			if !reflect.DeepEqual((*fullStubClient).PutParameterInputReceived, test.expectedOutput) {
-				t.Errorf(`Unexpected parameter: got %v, expected %v`, (*fullStubClient).PutParameterInputReceived, test.expectedOutput)
+			if !reflect.DeepEqual(test.ssmClient.PutParameterInputReceived, test.expectedOutput) {
+				t.Errorf(`Unexpected parameter: got %v, expected %v`, test.ssmClient.PutParameterInputReceived, test.expectedOutput)
 			}
 		})
 	}
@@ -269,7 +267,7 @@ func TestParameterStore_PutSecureParameterWithCMK(t *testing.T) {
 	kmsID := "super-secret-kms"
 	tests := []struct {
 		name           string
-		ssmClient      ssmClient
+		ssmClient      *stubSSMClient
 		parameterName  string
 		parameterValue string
 		overwrite      bool
@@ -318,9 +316,8 @@ func TestParameterStore_PutSecureParameterWithCMK(t *testing.T) {
 			if err != test.expectedError {
 				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
 			}
-			fullStubClient := test.ssmClient.(*stubSSMClient)
-			if !reflect.DeepEqual(fullStubClient.PutParameterInputReceived, test.expectedOutput) {
-				t.Error(`Unexpected parameter`, fullStubClient.PutParameterInputReceived, test.expectedOutput)
+			if !reflect.DeepEqual(test.ssmClient.PutParameterInputReceived, test.expectedOutput) {
+				t.Errorf(`Unexpected parameter: got %v, expected %v`, test.ssmClient.PutParameterInputReceived, test.expectedOutput)
 			}
 		})
 	}
