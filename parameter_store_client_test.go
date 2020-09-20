@@ -2,10 +2,11 @@ package awsssm
 
 import (
 	"errors"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/ssm"
 	"reflect"
 	"testing"
+
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/service/ssm"
 )
 
 var param1 = new(ssm.Parameter).
@@ -18,6 +19,7 @@ var param2 = new(ssm.Parameter).
 	SetValue("rds.something.aws.com").
 	SetARN("arn:aws:ssm:us-east-2:aws-account-id:/my-service/dev/DB_HOST")
 
+//  return s.GetParametersByPathOutput, s.GetParametersByPathError
 var param3 = new(ssm.Parameter).
 	SetName("/my-service/dev/DB_USERNAME").
 	SetValue("username").
@@ -31,13 +33,14 @@ type stubGetParametersByPathOutput struct {
 }
 
 type stubSSMClient struct {
-	GetParametersByPathOutput        []stubGetParametersByPathOutput
-	GetParametersByPathError         error
-	GetParameterOutput               *ssm.GetParameterOutput
-	GetParameterError                error
+	GetParametersByPathOutput []stubGetParametersByPathOutput
+	GetParametersByPathError  error
+	GetParameterOutput        *ssm.GetParameterOutput
+	GetParameterError         error
+	PutParameterInputReceived *ssm.PutParameterInput
 }
 
-func (s stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error {
+func (s *stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error {
 	if s.GetParametersByPathError == nil {
 		for _, output := range s.GetParametersByPathOutput {
 			done := fn(&output.Output, output.MoreParamsLeft)
@@ -49,8 +52,15 @@ func (s stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathIn
 	return s.GetParametersByPathError
 }
 
-func (s stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
+func (s *stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
 	return s.GetParameterOutput, s.GetParameterError
+}
+
+// we return nothing becuase the actual response is pretty boring. Just a version number. We DO
+// want to track was is input because there is a _little_ business logic around that
+func (s *stubSSMClient) PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error) {
+	s.PutParameterInputReceived = input
+	return nil, nil
 }
 
 func TestClient_GetParametersByPath(t *testing.T) {
@@ -69,6 +79,12 @@ func TestClient_GetParametersByPath(t *testing.T) {
 						MoreParamsLeft: true,
 						Output: ssm.GetParametersByPathOutput{
 							Parameters: getParameters(),
+						},
+					},
+					{
+						MoreParamsLeft: true,
+						Output: ssm.GetParametersByPathOutput{
+							Parameters: getParameters2(),
 						},
 					},
 					{
@@ -110,7 +126,7 @@ func TestClient_GetParametersByPath(t *testing.T) {
 				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
 			}
 			if !reflect.DeepEqual(parameters, test.expectedOutput) {
-				t.Error(`Unexpected parameters`, *parameters, *test.expectedOutput)
+				t.Errorf(`Unexpected parameters: got: %+v, expected: %+v`, *parameters, *test.expectedOutput)
 			}
 		})
 	}
@@ -119,6 +135,12 @@ func TestClient_GetParametersByPath(t *testing.T) {
 func getParameters() []*ssm.Parameter {
 	return []*ssm.Parameter{
 		param1, param2,
+	}
+}
+
+func getParameters2() []*ssm.Parameter {
+	return []*ssm.Parameter{
+		param3,
 	}
 }
 
@@ -168,6 +190,133 @@ func TestParameterStore_GetParameter(t *testing.T) {
 			}
 			if !reflect.DeepEqual(parameter, test.expectedOutput) {
 				t.Error(`Unexpected parameter`, *parameter, *test.expectedOutput)
+			}
+		})
+	}
+}
+
+func TestParameterStore_PutSecureParameter(t *testing.T) {
+	paramName := "foo"
+	paramValue := "baz"
+	paramType := "SecureString"
+	overwriteTrue := true
+	overwriteFalse := false
+
+	tests := []struct {
+		name           string
+		ssmClient      *stubSSMClient
+		parameterName  string
+		parameterValue string
+		overwrite      bool
+		expectedError  error
+		expectedInput  *ssm.PutParameterInput
+	}{
+		{
+			name:           "Failed Empty name",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  "",
+			parameterValue: "",
+			expectedError:  ErrParameterInvalidName,
+		},
+		{
+			name:           "Set Correct Defaults",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  paramName,
+			parameterValue: paramValue,
+			expectedInput: &ssm.PutParameterInput{
+				Name:      &paramName,
+				Type:      &paramType,
+				Value:     &paramValue,
+				Overwrite: &overwriteFalse,
+			},
+		},
+		{
+			name:           "Overwrite Changes Propagate",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  paramName,
+			parameterValue: paramValue,
+			overwrite:      overwriteTrue,
+			expectedInput: &ssm.PutParameterInput{
+				Name:      &paramName,
+				Type:      &paramType,
+				Value:     &paramValue,
+				Overwrite: &overwriteTrue,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewParameterStoreWithClient(test.ssmClient)
+			err := client.PutSecureParameter(test.parameterName, test.parameterValue, test.overwrite)
+			if err != test.expectedError {
+				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
+			}
+			if !reflect.DeepEqual(test.ssmClient.PutParameterInputReceived, test.expectedInput) {
+				t.Errorf(`Unexpected parameter: got %v, expected %v`, test.ssmClient.PutParameterInputReceived, test.expectedInput)
+			}
+		})
+	}
+}
+
+func TestParameterStore_PutSecureParameterWithCMK(t *testing.T) {
+	paramName := "foo"
+	paramValue := "baz"
+	paramType := "SecureString"
+	overwriteFalse := false
+	kmsID := "super-secret-kms"
+	tests := []struct {
+		name           string
+		ssmClient      *stubSSMClient
+		parameterName  string
+		parameterValue string
+		overwrite      bool
+		kmsID          string
+		expectedError  error
+		expectedInput  *ssm.PutParameterInput
+	}{
+		{
+			name:           "Failed Empty name",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  "",
+			parameterValue: "",
+			expectedError:  ErrParameterInvalidName,
+		},
+		{
+			name:           "Set Correct Defaults",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  paramName,
+			parameterValue: paramValue,
+			expectedInput: &ssm.PutParameterInput{
+				Name:      &paramName,
+				Overwrite: &overwriteFalse,
+				Type:      &paramType,
+				Value:     &paramValue,
+			},
+		},
+		{
+			name:           "KMS ID Changes Propagate",
+			ssmClient:      &stubSSMClient{},
+			parameterName:  paramName,
+			parameterValue: paramValue,
+			kmsID:          kmsID,
+			expectedInput: &ssm.PutParameterInput{
+				KeyId:     &kmsID,
+				Name:      &paramName,
+				Overwrite: &overwriteFalse,
+				Type:      &paramType,
+				Value:     &paramValue,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewParameterStoreWithClient(test.ssmClient)
+			err := client.PutSecureParameterWithCMK(test.parameterName, test.parameterValue, test.overwrite, test.kmsID)
+			if err != test.expectedError {
+				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
+			}
+			if !reflect.DeepEqual(test.ssmClient.PutParameterInputReceived, test.expectedInput) {
+				t.Errorf(`Unexpected parameter: got %v, expected %v`, test.ssmClient.PutParameterInputReceived, test.expectedInput)
 			}
 		})
 	}
