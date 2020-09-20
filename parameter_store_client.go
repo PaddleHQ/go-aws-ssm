@@ -127,7 +127,7 @@ func (ps *ParameterStore) putParameter(input *ssm.PutParameterInput) error {
 	_, err := ps.ssm.PutParameter(input)
 	if err != nil {
 		if awsError, ok := err.(awserr.Error); ok && awsError.Code() == ssm.ErrCodeParameterAlreadyExists {
-      return ErrParameterInvalidName
+			return ErrParameterInvalidName
 		}
 		return err
 	}

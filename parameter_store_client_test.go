@@ -2,7 +2,6 @@ package awsssm
 
 import (
 	"errors"
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -38,10 +37,10 @@ type stubSSMClient struct {
 	GetParametersByPathError  error
 	GetParameterOutput        *ssm.GetParameterOutput
 	GetParameterError         error
-	PutParameterInputReceived ssm.PutParameterInput
+	PutParameterInputReceived *ssm.PutParameterInput
 }
 
-func (s stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error {
+func (s *stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error {
 	if s.GetParametersByPathError == nil {
 		for _, output := range s.GetParametersByPathOutput {
 			done := fn(&output.Output, output.MoreParamsLeft)
@@ -53,15 +52,14 @@ func (s stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathIn
 	return s.GetParametersByPathError
 }
 
-func (s stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
+func (s *stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
 	return s.GetParameterOutput, s.GetParameterError
 }
 
 // we return nothing becuase the actual response is pretty boring. Just a version number. We DO
 // want to track was is input because there is a _little_ business logic around that
-func (s stubSSMClient) PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error) {
-	s.PutParameterInputReceived = *input
-	fmt.Printf("PutParameterInputReceived: %v", *input)
+func (s *stubSSMClient) PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error) {
+	s.PutParameterInputReceived = input
 	return nil, nil
 }
 
@@ -203,6 +201,7 @@ func TestParameterStore_PutSecureParameter(t *testing.T) {
 	paramType := "SecureString"
 	overwriteTrue := true
 	overwriteFalse := false
+
 	tests := []struct {
 		name           string
 		ssmClient      *stubSSMClient
@@ -210,7 +209,7 @@ func TestParameterStore_PutSecureParameter(t *testing.T) {
 		parameterValue string
 		overwrite      bool
 		expectedError  error
-		expectedOutput ssm.PutParameterInput
+		expectedInput  *ssm.PutParameterInput
 	}{
 		{
 			name:           "Failed Empty name",
@@ -224,7 +223,7 @@ func TestParameterStore_PutSecureParameter(t *testing.T) {
 			ssmClient:      &stubSSMClient{},
 			parameterName:  paramName,
 			parameterValue: paramValue,
-			expectedOutput: ssm.PutParameterInput{
+			expectedInput: &ssm.PutParameterInput{
 				Name:      &paramName,
 				Type:      &paramType,
 				Value:     &paramValue,
@@ -237,7 +236,7 @@ func TestParameterStore_PutSecureParameter(t *testing.T) {
 			parameterName:  paramName,
 			parameterValue: paramValue,
 			overwrite:      overwriteTrue,
-			expectedOutput: ssm.PutParameterInput{
+			expectedInput: &ssm.PutParameterInput{
 				Name:      &paramName,
 				Type:      &paramType,
 				Value:     &paramValue,
@@ -252,8 +251,8 @@ func TestParameterStore_PutSecureParameter(t *testing.T) {
 			if err != test.expectedError {
 				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
 			}
-			if !reflect.DeepEqual(test.ssmClient.PutParameterInputReceived, test.expectedOutput) {
-				t.Errorf(`Unexpected parameter: got %v, expected %v`, test.ssmClient.PutParameterInputReceived, test.expectedOutput)
+			if !reflect.DeepEqual(test.ssmClient.PutParameterInputReceived, test.expectedInput) {
+				t.Errorf(`Unexpected parameter: got %v, expected %v`, test.ssmClient.PutParameterInputReceived, test.expectedInput)
 			}
 		})
 	}
@@ -273,7 +272,7 @@ func TestParameterStore_PutSecureParameterWithCMK(t *testing.T) {
 		overwrite      bool
 		kmsID          string
 		expectedError  error
-		expectedOutput ssm.PutParameterInput
+		expectedInput  *ssm.PutParameterInput
 	}{
 		{
 			name:           "Failed Empty name",
@@ -287,7 +286,7 @@ func TestParameterStore_PutSecureParameterWithCMK(t *testing.T) {
 			ssmClient:      &stubSSMClient{},
 			parameterName:  paramName,
 			parameterValue: paramValue,
-			expectedOutput: ssm.PutParameterInput{
+			expectedInput: &ssm.PutParameterInput{
 				Name:      &paramName,
 				Overwrite: &overwriteFalse,
 				Type:      &paramType,
@@ -300,7 +299,7 @@ func TestParameterStore_PutSecureParameterWithCMK(t *testing.T) {
 			parameterName:  paramName,
 			parameterValue: paramValue,
 			kmsID:          kmsID,
-			expectedOutput: ssm.PutParameterInput{
+			expectedInput: &ssm.PutParameterInput{
 				KeyId:     &kmsID,
 				Name:      &paramName,
 				Overwrite: &overwriteFalse,
@@ -316,8 +315,8 @@ func TestParameterStore_PutSecureParameterWithCMK(t *testing.T) {
 			if err != test.expectedError {
 				t.Errorf(`Unexpected error: got %d, expected %d`, err, test.expectedError)
 			}
-			if !reflect.DeepEqual(test.ssmClient.PutParameterInputReceived, test.expectedOutput) {
-				t.Errorf(`Unexpected parameter: got %v, expected %v`, test.ssmClient.PutParameterInputReceived, test.expectedOutput)
+			if !reflect.DeepEqual(test.ssmClient.PutParameterInputReceived, test.expectedInput) {
+				t.Errorf(`Unexpected parameter: got %v, expected %v`, test.ssmClient.PutParameterInputReceived, test.expectedInput)
 			}
 		})
 	}
