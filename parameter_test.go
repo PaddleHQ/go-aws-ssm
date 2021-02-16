@@ -154,6 +154,35 @@ func TestParameters_Read(t *testing.T) {
 	}
 }
 
+func TestParameters_GetAllValues(t *testing.T) {
+	tests := []struct {
+		name       string
+		basePath   string
+		parameters map[string]*Parameter
+	}{
+		{
+			name:       "GetAllValues default map",
+			basePath:   "/my-service/dev/",
+			parameters: getParametersMap(),
+		},
+		{
+			name:       "GetAllValues random map",
+			basePath:   "/my-service/dev/",
+			parameters: getRandomParametersMap(1000, 10),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parameter := NewParameters(test.basePath, test.parameters)
+
+			mp := parameter.GetAllValues()
+			if len(mp) != len(test.parameters) {
+				t.Errorf(`Unexpected value: got %v, expected %v`, len(mp), len(test.parameters))
+			}
+		})
+	}
+}
+
 func getParametersMap() map[string]*Parameter {
 	return map[string]*Parameter{
 		"/my-service/dev/DB_PASSWORD": {Value: param1.Value},

@@ -90,3 +90,8 @@ func (p *Parameters) getKeyValueMap() map[string]string {
 	}
 	return keyValue
 }
+
+// GetAllValues returns a map with all the keys and values in the store.
+func (p *Parameters) GetAllValues() map[string]string {
+	return p.getKeyValueMap()
+}
