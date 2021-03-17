@@ -2,7 +2,7 @@ apiVersion: backstage.io/v1alpha1
 kind: Component
 metadata:
   name: go-aws-ssm
-  description: Chronos service is powering our SLIs
+  description: Go package that interfaces with AWS System Manager.
   tags:
     - Go
 spec:
