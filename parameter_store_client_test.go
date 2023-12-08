@@ -19,7 +19,7 @@ var param2 = new(ssm.Parameter).
 	SetValue("rds.something.aws.com").
 	SetARN("arn:aws:ssm:us-east-2:aws-account-id:/my-service/dev/DB_HOST")
 
-//  return s.GetParametersByPathOutput, s.GetParametersByPathError
+// return s.GetParametersByPathOutput, s.GetParametersByPathError
 var param3 = new(ssm.Parameter).
 	SetName("/my-service/dev/DB_USERNAME").
 	SetValue("username").

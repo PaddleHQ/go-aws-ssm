@@ -22,18 +22,18 @@ type ssmClient interface {
 	PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error)
 }
 
-//ParameterStore holds all the methods tha are supported against AWS Parameter Store
+// ParameterStore holds all the methods tha are supported against AWS Parameter Store
 type ParameterStore struct {
 	ssm ssmClient
 }
 
-//GetAllParametersByPath is returning all the Parameters that are hierarchy linked to this path
-//For example a request with path as /my-service/dev/
-//Will return /my-service/dev/param-a, /my-service/dev/param-b, etc... but will not return recursive paths
-//the `ssm:GetAllParametersByPath` permission is required
-//to the `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/*`
+// GetAllParametersByPath is returning all the Parameters that are hierarchy linked to this path
+// For example a request with path as /my-service/dev/
+// Will return /my-service/dev/param-a, /my-service/dev/param-b, etc... but will not return recursive paths
+// the `ssm:GetAllParametersByPath` permission is required
+// to the `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/*`
 //
-//This will also page through and return all elements in the hierarchy, non-recursively
+// This will also page through and return all elements in the hierarchy, non-recursively
 func (ps *ParameterStore) GetAllParametersByPath(path string, decrypt bool) (*Parameters, error) {
 	var input = &ssm.GetParametersByPathInput{}
 	input.SetWithDecryption(decrypt)
@@ -58,11 +58,11 @@ func (ps *ParameterStore) getParameters(input *ssm.GetParametersByPathInput) (*P
 	return parameters, nil
 }
 
-//GetParameter is returning the parameter with the given name
-//For example a request with name as /my-service/dev/param-1
-//Will return the parameter value if exists or ErrParameterInvalidName if parameter cannot be found
-//The `ssm:GetParameter` permission is required
-//to the `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
+// GetParameter is returning the parameter with the given name
+// For example a request with name as /my-service/dev/param-1
+// Will return the parameter value if exists or ErrParameterInvalidName if parameter cannot be found
+// The `ssm:GetParameter` permission is required
+// to the `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
 func (ps *ParameterStore) GetParameter(name string, decrypted bool) (*Parameter, error) {
 	if name == "" {
 		return nil, ErrParameterInvalidName
@@ -85,21 +85,21 @@ func (ps *ParameterStore) getParameter(input *ssm.GetParameterInput) (*Parameter
 	}, nil
 }
 
-//PutSecureParameter is setting the parameter with the given name to a passed in value.
-//Allow overwriting the value of the parameter already exists, otherwise an error is returned
-//For example a request with name as '/my-service/dev/param-1':
-//Will set the parameter value if exists or ErrParameterInvalidName if parameter already exists or is empty
+// PutSecureParameter is setting the parameter with the given name to a passed in value.
+// Allow overwriting the value of the parameter already exists, otherwise an error is returned
+// For example a request with name as '/my-service/dev/param-1':
+// Will set the parameter value if exists or ErrParameterInvalidName if parameter already exists or is empty
 // and `overwrite` is false. The `ssm:PutParameter` permission is required to the
-//`arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
+// `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
 func (ps *ParameterStore) PutSecureParameter(name, value string, overwrite bool) error {
 	return ps.putSecureParameterWrapper(name, value, "", overwrite)
 }
 
-//PutSecureParameterWithCMK is the same as PutSecureParameter but with a passed in CMK (Customer Master Key)
-//For example a request with name as '/my-service/dev/param-1' and a `kmsID` of 'foo':
-//Will set the parameter value if exists or ErrParameterInvalidName if parameter already exists or is empty
+// PutSecureParameterWithCMK is the same as PutSecureParameter but with a passed in CMK (Customer Master Key)
+// For example a request with name as '/my-service/dev/param-1' and a `kmsID` of 'foo':
+// Will set the parameter value if exists or ErrParameterInvalidName if parameter already exists or is empty
 // and `overwrite` is false. The `ssm:PutParameter` permission is required to the
-//`arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
+// `arn:aws:ssm:aws-region:aws-account-id:/my-service/dev/param-1` resource
 // The `kms:Encrypt` permission is required to the `arn:aws:kms:us-east-1:710015040892:key/foo`
 func (ps *ParameterStore) PutSecureParameterWithCMK(name, value string, overwrite bool, kmsID string) error {
 	return ps.putSecureParameterWrapper(name, value, kmsID, overwrite)
@@ -134,12 +134,12 @@ func (ps *ParameterStore) putParameter(input *ssm.PutParameterInput) error {
 	return nil
 }
 
-//NewParameterStoreWithClient is creating a new ParameterStore with the given ssm Client
+// NewParameterStoreWithClient is creating a new ParameterStore with the given ssm Client
 func NewParameterStoreWithClient(client ssmClient) *ParameterStore {
 	return &ParameterStore{ssm: client}
 }
 
-//NewParameterStore is creating a new ParameterStore by creating an AWS Session
+// NewParameterStore is creating a new ParameterStore by creating an AWS Session
 func NewParameterStore(ssmConfig ...*aws.Config) (*ParameterStore, error) {
 	sessionAWS, err := session.NewSession(ssmConfig...)
 	if err != nil {
