@@ -1,0 +1,98 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Setup Go
+description: |
+  This action sets up Go for use in actions by:
+  - extracts the Go version from the go.mod file
+  - runs the setup-go action to install the specified Go version
+  - for private repos then:
+    - creates a GitHub App Token to authenticate with the GitHub API
+    - generates git config files to authenticate with the GitHub API
+    - runs go mod download to install dependencies
+    - removes the git token from the cache
+
+inputs:
+  private-key:
+    description: >
+      The private key for the GitHub App, needed to authenticate with the
+      GitHub API to pull private go repos. For public repos this will
+      be an empty string.
+    required: true
+  private:
+    description: >
+      If the repo is private or not.
+    required: true
+  owner:
+    description: >
+      The owner of the repo.
+    required: true
+  clear-token:
+    description: >
+      If the token should be cleared from the cache after the reusable
+      workflow has completed. If setting to 'false' then you should manually
+      call `git credential-cache exit` after you have finished with the token.
+    default: 'true'
+    required: false
+
+outputs:
+  go-mod-version:
+    description: Version of Go extracted from go.mod file
+    value: ${{ steps.go-version.outputs.go-mod-version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Extract Go version
+      uses: arnested/go-version-action@8a203e9ff069cbbf4e3b65cb248101cfe307c71c # v1.1.18
+      id: go-version
+
+    # For libraries then we use the latest patch version of the minor go version.
+    # This should not be used for services.
+    - name: Split version code
+      uses: xom9ikk/split@10ba6c9f71c5953bc304e21781213e933b043891 #v1.1
+      id: split
+      with:
+        string: ${{ steps.go-version.outputs.go-mod-version }}
+        separator: .
+        limit: 2
+
+    - name: Set up Go
+      uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+      with:
+        go-version: '${{ steps.split.outputs._0 }}.${{ steps.split.outputs._1 }}'
+        check-latest: true
+        cache: true
+
+    - name: Create a GitHub App Token
+      uses: actions/create-github-app-token@c1a285145b9d317df6ced56c09f525b5c2b6f755 # v1.11.1
+      if: ${{ inputs.private && inputs.private-key != '' }}
+      id: app-token
+      with:
+        app-id: 1003800
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ inputs.owner }}
+
+    - name: Generate git config files
+      if: steps.app-token.outcome == 'success'
+      shell: bash
+      run: |
+        git config --global credential.https://github.com.helper cache
+
+        git credential approve <<EOF
+        protocol=https
+        host=github.com
+        username=x-access-token
+        password=${{ steps.app-token.outputs.token }}
+        EOF
+
+    - name: Install dependencies
+      shell: bash
+      env:
+        GOPRIVATE: github.com/PaddleHQ/*
+      run: |
+        go mod download ${{ runner.debug == '1' && '-x ' || '' }}all
+
+    - name: Remove git token from cache
+      if: inputs.clear-token == 'true'
+      shell: bash
+      run: git credential-cache exit

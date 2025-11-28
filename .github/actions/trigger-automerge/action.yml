@@ -1,0 +1,42 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Trigger Automerge
+description: |
+  This is a helper function to trigger the automerge action.
+
+inputs:
+  event:
+    description: 'The PR event'
+    required: true
+  hasAutoApproverPrivateKey:
+    description: 'A boolean value indicating if the private key for the auto approver GitHub App is set'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Attempt to automerge
+      if: inputs.hasAutoApproverPrivateKey == 'true' &&
+          fromJSON(inputs.event).pull_request.merged == false &&
+          fromJSON(inputs.event).pull_request.draft == false &&
+          fromJSON(inputs.event).pull_request.state == 'open'
+      uses: benc-uk/workflow-dispatch@e2e5e9a103e331dad343f381a29e654aea3cf8fc # v1.2.4
+      with:
+        workflow: automerge.yml
+        ref: ${{ github.head_ref || github.ref_name }}
+        inputs: '{
+            "pr_number": "${{ fromJSON(inputs.event).pull_request.number }}",
+            "workflow": "${{ github.workflow }}"
+          }'
+
+    - name: Attempt to auto ready for review
+      if: fromJSON(inputs.event).pull_request.draft == true
+      uses: benc-uk/workflow-dispatch@e2e5e9a103e331dad343f381a29e654aea3cf8fc # v1.2.4
+      with:
+        workflow: auto-ready-for-review.yml
+        ref: ${{ github.head_ref || github.ref_name }}
+        inputs: '{
+            "pr_number": "${{ fromJSON(inputs.event).pull_request.number }}",
+            "head_sha": "${{ fromJSON(inputs.event).pull_request.head.sha }}",
+            "workflow": "${{ github.workflow }}"
+          }'
