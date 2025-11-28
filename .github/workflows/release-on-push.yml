@@ -1,0 +1,33 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Create release on push to main branch
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release_on_push:
+    name: Create release on push to main branch
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - name: Create release based on label
+        uses: step-security/release-on-push-action@a316bfbcd30285e92688f3300f6270d6579e8b75 # v0.28.4
+        with:
+          bump_version_scheme: norelease
+          use_github_release_notes: true
+          dry_run: ${{ format('refs/heads/{0}', github.event.repository.default_branch) != github.ref }}

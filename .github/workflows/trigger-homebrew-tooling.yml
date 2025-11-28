@@ -1,0 +1,64 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Trigger release in the Homebrew Tooling repository
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  checks: read
+  actions: write
+
+jobs:
+  trigger_homebrew_tooling_release:
+    if: github.repository != 'PaddleHQ/go-library-template'
+
+    name: Trigger release in the Homebrew Tooling repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - name: GitHub Checks
+        uses: poseidon/wait-for-status-checks@899c768d191b56eef585c18f8558da19e1f3e707 # v0.6.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          match_pattern: release_on_push
+
+      - name: Get Current Release
+        id: get_current_release
+        uses: joutvhu/get-release@9a8271732adc3299a22f8ad09b0a67eb3aa836ac # v1.0.3
+        with:
+          latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create a GitHub App Token
+        uses: actions/create-github-app-token@7e473efe3cb98aa54f8d4bac15400b15fad77d94 # v2.2.0
+        id: app-token
+        with:
+          app-id: 1124423
+          private-key: ${{ secrets.HOMEBREW_TOOLING_WORKFLOW_TRIGGER_PRIVATE_KEY }}
+          owner: PaddleHQ
+
+      - name: Trigger Homebrew update
+        env:
+          PARENT_REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          repo_owner="PaddleHQ"
+          repo_name="homebrew-tooling"
+          workflow_id="release.yml"
+          version="${{ steps.get_current_release.outputs.tag_name }}"
+
+          curl -L --fail-with-body \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ steps.app-token.outputs.token }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${repo_owner}/${repo_name}/actions/workflows/${workflow_id}/dispatches" \
+            -d "{\"ref\":\"main\", \"inputs\": {\"package\": \"${PARENT_REPO_NAME}\", \"version\": \"$version\"}}"
