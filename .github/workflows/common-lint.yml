@@ -1,0 +1,53 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Ensure code passes common linting rules
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read # Required to check out the code
+  pull-requests: write # Required to post a comment on the PR
+  checks: write # Required to post a comment on the PR
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+
+jobs:
+  common-lint:
+    name: Ensure code passes generic linting rules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - name: Check out code
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Lint github actions
+        uses: reviewdog/action-actionlint@437bbe918b0d29544cbf9e8b1d63fe6f4e7a881d # v1.69.0
+        with:
+          reporter: github-pr-review
+          filter_mode: nofilter
+          fail_level: 'any'
+
+      - name: Install editorconfig-checker
+        uses: editorconfig-checker/action-editorconfig-checker@4b6cd6190d435e7e084fb35e36a096e98506f7b9 # v2.1.0
+        with:
+          version: v3.4.1
+
+      - name: Validate editorconfig
+        run: editorconfig-checker
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
