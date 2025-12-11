@@ -12,9 +12,9 @@ runs:
       id: go_testament
       shell: bash
       run: |
-        HAS_TESTAMENT=$(go list -m all | grep 'github.com/PaddleHQ/go-testament ' || echo "")
+        HAS_TESTAMENT=$(go list -m -f '{{if not .Indirect}}{{.Path}}{{end}}' all | grep -E '^github.com/PaddleHQ/go-testament(/v[0-9]+)?$' || true)
 
-        if [[ "${HAS_TESTAMENT}" -eq "" ]]; then
+        if [[ -z "${HAS_TESTAMENT}" ]]; then
           echo "imported=false" >> "$GITHUB_OUTPUT"
         else
           echo "imported=true" >> "$GITHUB_OUTPUT"
