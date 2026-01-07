@@ -77,7 +77,7 @@ jobs:
         if: |-
           steps.gate.outputs.ok == 'true' &&
           github.event.inputs.workflow != ''
-        uses: wechuli/allcheckspassed@f423b273f5fdf73582e41f8f6f0f204d69c27379 # v2.1.0
+        uses: wechuli/allcheckspassed@b0eaef5be76003932c9520e2b3dd03c85cc43d87 # v2.2.0
         id: check-caller
         with:
           delay: '0'
@@ -90,7 +90,7 @@ jobs:
         if: |-
           steps.gate.outputs.ok == 'true' &&
           steps.check-caller.outcome == 'success'
-        uses: wechuli/allcheckspassed@f423b273f5fdf73582e41f8f6f0f204d69c27379 # v2.1.0
+        uses: wechuli/allcheckspassed@b0eaef5be76003932c9520e2b3dd03c85cc43d87 # v2.2.0
         id: check-all
         with:
           delay: '0'

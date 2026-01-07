@@ -60,7 +60,7 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.20.0
-          go install github.com/PaddleHQ/modfmt@v0.1.1
+          go install github.com/abhijit-hota/modfmt@v0.0.0-20260105113844-287023c3d905
 
       - name: Setup test databases
         uses: ./.github/actions/setup-databases
@@ -94,10 +94,9 @@ jobs:
         env:
           GOTOOLCHAIN: local
         run: |
-          modfmt --replace
-          git diff --exit-code || \
+          modfmt --check || \
             (
-              echo '::error file=go.mod,line=1,endLine=1,title=Incorrect formatting of go.mod::Please run "go run github.com/PaddleHQ/modfmt@latest --replace"' \
+              echo '::error file=go.mod,line=1,endLine=1,title=Incorrect formatting of go.mod::Please run "go run github.com/abhijit-hota/modfmt@latest --in-place"' \
               && exit 1
             )
 
