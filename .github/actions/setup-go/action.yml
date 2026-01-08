@@ -49,7 +49,7 @@ runs:
     # For libraries then we use the latest patch version of the minor go version.
     # This should not be used for services.
     - name: Split version code
-      uses: xom9ikk/split@10ba6c9f71c5953bc304e21781213e933b043891 #v1.1
+      uses: step-security/split-strings@d2212424ae73f4709b3a56faaf96ea42d189102f # v1.0.1
       id: split
       with:
         string: ${{ steps.go-version.outputs.go-mod-version }}
