@@ -70,7 +70,6 @@ jobs:
               echo "ok=true" >> "$GITHUB_OUTPUT"
             else
               echo "ok=false" >> "$GITHUB_OUTPUT"
-              exit 1
             fi
 
       - name: "⏳ Wait for calling workflow to be ready"
