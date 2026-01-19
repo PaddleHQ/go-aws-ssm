@@ -96,7 +96,7 @@ jobs:
           verbose: true
           poll: false
           commit_sha: ${{ inputs.head_sha }}
-          checks_exclude: \[AutoReady\/.*\].*
+          checks_exclude: (AutoReady|StepSecurity).*
 
       - name: "🔑 Generate GitHub App Token" # github.token doesn't have permission to mark PR ready for review :(
         id: generate-token

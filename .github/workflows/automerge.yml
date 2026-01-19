@@ -151,7 +151,7 @@ jobs:
         with:
           delay: '0'
           poll: false
-          checks_exclude: \[Automerge\/.*\].*
+          checks_exclude: (\[Automerge\/.*\]|StepSecurity).*
 
       - name: "✅ Confirm Automerge Eligibility"
         id: check-failure
