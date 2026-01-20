@@ -35,10 +35,12 @@ jobs:
       - name: Calculate lines changed
         id: lines_changed
         run: |
+          merge_base=$(git merge-base origin/${{ github.event.pull_request.base.ref }} HEAD)
+
           # 1. Use git diff --shortstat to calculate all changed lines
           # 2. Exclude go.mod, go.sum and mocks
           # 3. Use awk to sum the added and deleted lines to get total lines changed
-          LINES_CHANGED=$(git diff --shortstat origin/${{ github.event.pull_request.base.ref }} -- \
+          LINES_CHANGED=$(git diff --shortstat "origin/${merge_base}" -- \
             ':!go.mod' \
             ':!go.sum' \
             ':!*/mocks/*' \
