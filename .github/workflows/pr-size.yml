@@ -40,7 +40,7 @@ jobs:
           # 1. Use git diff --shortstat to calculate all changed lines
           # 2. Exclude go.mod, go.sum and mocks
           # 3. Use awk to sum the added and deleted lines to get total lines changed
-          LINES_CHANGED=$(git diff --shortstat "origin/${merge_base}" -- \
+          LINES_CHANGED=$(git diff --shortstat "${merge_base}" -- \
             ':!go.mod' \
             ':!go.sum' \
             ':!*/mocks/*' \
