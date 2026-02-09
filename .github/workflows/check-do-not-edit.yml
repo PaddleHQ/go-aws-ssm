@@ -33,7 +33,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-          fetch-depth: 0
+          fetch-depth: 0 # fetch all history to allow diff
 
       - name: Check for DO NOT EDIT warnings
         shell: bash
