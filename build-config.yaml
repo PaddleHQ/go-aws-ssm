@@ -1,1 +1,2 @@
-requiredCoverage: 83
+approveBotEnabled: true
+mergeBotEnabled: false
