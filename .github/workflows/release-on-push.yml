@@ -21,12 +21,12 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@20cf305ff2072d973412fa9b1e3a4f227bda3c76 # v2.14.0
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
         with:
           egress-policy: audit
 
       - name: Create release based on label
-        uses: step-security/release-on-push-action@a316bfbcd30285e92688f3300f6270d6579e8b75 # v0.28.4
+        uses: step-security/release-on-push-action@cb8d0f4644b90de8de1c49113ad7e66f13224c3d # v0.28.5
         with:
           bump_version_scheme: norelease
           use_github_release_notes: true
