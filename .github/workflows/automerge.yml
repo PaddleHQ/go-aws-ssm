@@ -303,6 +303,55 @@ jobs:
     outputs:
       can_automerge: ${{ steps.check-additions.outputs.can_automerge }}
 
+  check_renovate_changes:
+    name: "[Automerge/Check] ⚙️ Check Renovate Changes"
+    needs:
+      - pr_info
+      - wait_for_ready
+    runs-on: ubuntu-latest
+
+    if: |-
+      needs.wait_for_ready.outputs.can_automerge == 'true' &&
+      needs.pr_info.outputs.user_login == 'app/paddle-renovate' &&
+      (
+        contains(needs.pr_info.outputs.labels, 'origin:outboxer') ||
+        contains(needs.pr_info.outputs.labels, 'origin:queue-relay')
+      )
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.pr_info.outputs.head_ref }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: "📖 Read Build Configuration"
+        id: build_config
+        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+      - name: "🔍 Analyze Template Changes"
+        id: check-files
+        run: |
+          echo "🔍 Checking which files were modified by from a library template sync..."
+          # Check if only safe files were modified (workflows and dependabot config)
+          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- ':!*.yaml.tmpl'; then
+            echo "✅ Only safe template files modified - automerge enabled"
+            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️ Updates to non-standard files - automerge not enabled. Requires manual review"
+          fi
+
+    outputs:
+      can_automerge: ${{ steps.check-files.outputs.can_automerge }}
+
   # --
   # If automerge is enabled then approve and merge the PR
 
@@ -316,6 +365,7 @@ jobs:
       - check_dependabot_changes
       - check_library_template_changes
       - check_paddle_config_changes
+      - check_renovate_changes
 
     # Run if any of the check jobs approved automerge
     # always() ensures this is a `or` condition and does not depend on ALL the checks passing, but only one.
@@ -323,7 +373,8 @@ jobs:
       always() && (
         needs.check_dependabot_changes.outputs.can_automerge == 'true' ||
         needs.check_library_template_changes.outputs.can_automerge == 'true' ||
-        needs.check_paddle_config_changes.outputs.can_automerge == 'true'
+        needs.check_paddle_config_changes.outputs.can_automerge == 'true' ||
+        needs.check_renovate_changes.outputs.can_automerge == 'true'
       )
 
     steps:

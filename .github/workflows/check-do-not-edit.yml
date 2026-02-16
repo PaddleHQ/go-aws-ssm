@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -79,3 +80,9 @@ jobs:
           else
             echo "No DO NOT EDIT warnings found in changed files."
           fi
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
