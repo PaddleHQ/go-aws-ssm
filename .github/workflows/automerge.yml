@@ -110,7 +110,8 @@ jobs:
     if: |-
       needs.pr_info.outputs.draft == 'false' && (
         needs.pr_info.outputs.user_login == 'app/dependabot' ||
-        needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync'
+        needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' ||
+        needs.pr_info.outputs.user_login == 'app/paddle-renovate'
       )
 
     steps:
@@ -223,7 +224,8 @@ jobs:
       needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
       (
         contains(needs.pr_info.outputs.labels, 'origin:go-library-template') ||
-        contains(needs.pr_info.outputs.labels, 'origin:php-library-template')
+        contains(needs.pr_info.outputs.labels, 'origin:php-library-template') ||
+        contains(needs.pr_info.outputs.labels, 'origin:example-service')
       )
 
     steps:
