@@ -10,6 +10,9 @@ env:
   # Required to enable support for synctest.Run
   # This will be removed once we update to go 1.25
   GOEXPERIMENT: synctest
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "067421297632"
+  WKHTMLTOPDF_PATH: "/bin/wkhtmltopdf"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -19,11 +22,14 @@ permissions:
   contents: read
   pull-requests: write
   actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+  id-token: write # required for ECR login (pull go-dtr-base container)
 
 jobs:
-  test:
-    name: Run tests and validate coverage
+  read-config:
+    name: Read build configuration
     runs-on: ubuntu-24.04
+    outputs:
+      testRunner: ${{ steps.build_config.outputs.testRunner }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
@@ -35,6 +41,67 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+
+      - name: Read build config
+        id: build_config
+        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+  ecr-login:
+    name: ECR login for test container
+    runs-on: ubuntu-24.04
+    needs: read-config
+    outputs:
+      token: ${{ steps.ecr-token.outputs.token }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - name: Configure AWS credentials
+        if: needs.read-config.outputs.testRunner != ''
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with:
+          audience: sts.amazonaws.com
+          role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::067421297632:role/paddle-tfecr-gha-ecr-${{ github.event.repository.name }}
+          aws-region: us-east-1
+          role-duration-seconds: 900
+          retry-max-attempts: 3
+
+      - name: Get ECR login token
+        if: needs.read-config.outputs.testRunner != ''
+        id: ecr-token
+        run: |
+          echo "token=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Run tests and validate coverage
+    needs:
+      - read-config
+      - ecr-login
+    runs-on: ubuntu-24.04
+    container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
+    steps:
+      - name: Mask ECR token in logs
+        if: needs.read-config.outputs.testRunner != ''
+        run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
+
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Allow git in workspace (required for Go -buildvcs in container)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -86,6 +153,7 @@ jobs:
         timeout-minutes: 20
         env:
           ENVIRONMENT: ci
+          CGO_ENABLED: 1
         run: |
           gotestsum \
             --format testname \
