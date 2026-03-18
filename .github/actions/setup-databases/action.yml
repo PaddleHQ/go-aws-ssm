@@ -53,6 +53,17 @@ runs:
       if: steps.build_config.outputs['enableMySQL'] == 'true'
       shell: bash
       run: |
+        # Optimise MySQL for CI: trade durability for speed
+        sudo systemctl stop mysql.service
+        cat <<EOF | sudo tee /etc/mysql/conf.d/ci.cnf
+        [mysqld]
+        skip-log-bin
+        innodb_flush_log_at_trx_commit=0
+        sync_binlog=0
+        innodb_doublewrite=0
+        innodb_flush_method=nosync
+        EOF
+
         sudo systemctl start mysql.service
         sudo mysql --user=root --password=root -e "CREATE USER 'runner'@'localhost' IDENTIFIED BY 'hunter2';"
         sudo mysql --user=root --password=root -e "GRANT ALL PRIVILEGES ON *.* TO 'runner'@'localhost' WITH GRANT OPTION;"
