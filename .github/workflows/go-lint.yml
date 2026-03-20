@@ -35,7 +35,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-          fetch-depth: 0 # fetch all history to allow diff
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -56,29 +55,12 @@ jobs:
         with:
           config: ${{ github.workspace }}/.golangci.yml
 
-      - name: Get Merge Info
-        id: merge-base
-        run: |
-          # Get the merge base to determine the changes made in the PR compared to when it was branched from the
-          # default branch, instead of the diff to the default branch.
-          merge_base=$(git merge-base origin/${{ github.event.pull_request.base.ref }} HEAD)
-          echo "merge_base=${merge_base}" >> "$GITHUB_OUTPUT"
-
-          # If golangci config files or lint workflow files changed, lint the entire codebase instead of only new changes.
-          if git diff --name-only "${merge_base}" HEAD | grep -qE '^\.golangci|^\.github/workflows/go-lint'; then
-            echo "lint_all=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "lint_all=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: golangci-lint-v1
         if:   steps.lint-config.outputs['version'] != '2'
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # (6.5.0) - DO NOT UPGRADE!!!
         with:
           version: v1.64.6
-          args: >
-            --timeout=${{ steps.build_config.outputs['lintTimeout'] || '5m' }} --out-format github-actions
-            ${{ steps.merge-base.outputs.lint_all != 'true' && format('--new-from-rev={0}', steps.merge-base.outputs.merge_base) || '' }}
+          args: --timeout=${{ steps.build_config.outputs['lintTimeout'] || '5m' }} --out-format github-actions
           verify: false
 
       - name: golangci-lint-v2
@@ -86,9 +68,7 @@ jobs:
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           version: v2.5.0
-          args: >
-            --timeout=${{ steps.build_config.outputs['lintTimeout'] || '5m' }}
-            ${{ steps.merge-base.outputs.lint_all != 'true' && format('--new-from-rev={0}', steps.merge-base.outputs.merge_base) || '' }}
+          args: --timeout=${{ steps.build_config.outputs['lintTimeout'] || '5m' }}
           verify: false
 
       - name: Automerge
