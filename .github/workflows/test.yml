@@ -123,7 +123,7 @@ jobs:
             done
 
       - name: Cache test results
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
             ~/.cache/go-build
@@ -175,7 +175,7 @@ jobs:
 
       - name: Publish Test Report
         if: always()
-        uses: ctrf-io/github-test-reporter@024bc4b64d997ca9da86833c6b9548c55c620e40 # v1.0.26
+        uses: ctrf-io/github-test-reporter@31e2a2735dd4641c65c2f49eb07e93ce8ec37fff # v1.0.27
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
