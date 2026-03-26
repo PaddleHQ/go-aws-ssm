@@ -61,7 +61,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.20.0
           go install github.com/abhijit-hota/modfmt@v0.0.0-20260105113844-287023c3d905
-          go install github.com/PaddleHQ/ghokin/v4@d054884a017238b0dd9599698d1bb44193278446 # v4.0.3
+          go install github.com/PaddleHQ/ghokin/v4@04c53057ee42544250134253bf04f92799b0e709 # v4.1.0
 
       - name: Setup test databases
         uses: ./.github/actions/setup-databases
@@ -117,7 +117,7 @@ jobs:
         run: |
           [ -d "features/" ] || exit 0
           ghokin check features/ || \
-            (echo '::error title=Incorrect feature file formatting::Please run "go run github.com/PaddleHQ/ghokin/v4@d054884a017238b0dd9599698d1bb44193278446 fmt replace features/" to fix' && exit 1)
+            (echo '::error title=Incorrect feature file formatting::Please run "go run github.com/PaddleHQ/ghokin/v4@04c53057ee42544250134253bf04f92799b0e709 fmt replace features/" to fix' && exit 1)
 
       # --
       # Go Vulncheck
