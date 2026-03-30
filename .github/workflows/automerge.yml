@@ -421,7 +421,7 @@ jobs:
             echo "✅ PR merged successfully"
           elif echo "$MERGE_OUTPUT" | grep -q "merge queue"; then
             echo "🚂 Merge queue required, adding PR to queue..."
-            gh pr merge --admin --squash --merge-queue "${{ github.event.inputs.pr_number }}"
+            gh pr merge --squash "${{ github.event.inputs.pr_number }}"
           else
             echo "❌ Merge failed:"
             echo "$MERGE_OUTPUT"
