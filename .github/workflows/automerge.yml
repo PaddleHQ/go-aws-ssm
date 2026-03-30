@@ -413,6 +413,17 @@ jobs:
 
       - name: "🔀 Auto Merge PR"
         if: steps.build_config.outputs['mergeBotEnabled'] == 'true'
-        run: gh pr merge --admin --squash "${{ github.event.inputs.pr_number }}"
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          echo "🔀 Attempting direct merge..."
+          if MERGE_OUTPUT=$(gh pr merge --admin --squash "${{ github.event.inputs.pr_number }}" 2>&1); then
+            echo "✅ PR merged successfully"
+          elif echo "$MERGE_OUTPUT" | grep -q "merge queue"; then
+            echo "🚂 Merge queue required, adding PR to queue..."
+            gh pr merge --admin --squash --merge-queue "${{ github.event.inputs.pr_number }}"
+          else
+            echo "❌ Merge failed:"
+            echo "$MERGE_OUTPUT"
+            exit 1
+          fi
