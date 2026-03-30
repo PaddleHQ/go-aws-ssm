@@ -3,6 +3,7 @@
 name: Ensure SemVer Label is added
 
 on:
+  merge_group:
   pull_request:
     types:
       - opened
@@ -24,6 +25,7 @@ jobs:
   check_semver:
     name: Ensure SemVer Label is added
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -33,7 +35,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
 
       - name: Read build config

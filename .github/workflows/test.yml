@@ -3,6 +3,7 @@
 name: Run tests and validate coverage
 
 on:
+  merge_group:
   pull_request:
 
 env:
@@ -39,7 +40,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
 
       - name: Read build config
@@ -97,7 +98,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
 
       - name: Allow git in workspace (required for Go -buildvcs in container)
@@ -169,12 +170,12 @@ jobs:
             ./...
 
       - name: Convert test reports to CTRF
-        if: always()
+        if: always() && github.event_name == 'pull_request'
         run: |
           cat test-report.json | go-ctrf-json-reporter -quiet -output test-ctrf-report.json || true
 
       - name: Publish Test Report
-        if: always()
+        if: always() && github.event_name == 'pull_request'
         uses: ctrf-io/github-test-reporter@31e2a2735dd4641c65c2f49eb07e93ce8ec37fff # v1.0.27
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -207,6 +208,7 @@ jobs:
               ))" >> "$GITHUB_ENV"
 
       - name: Ensure coverage is good
+        if: github.event_name == 'pull_request'
         uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
         with:
           comment-tag: build_coverage
@@ -223,6 +225,7 @@ jobs:
         run: exit 1
 
       - name: Comment PR to update build coverage
+        if: github.event_name == 'pull_request'
         uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
         with:
           comment-tag: build_coverage

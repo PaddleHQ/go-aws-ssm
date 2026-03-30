@@ -3,6 +3,7 @@
 name: Ensure code passes common linting rules
 
 on:
+  merge_group:
   pull_request:
 
 concurrency:
@@ -28,7 +29,7 @@ jobs:
       - name: Check out code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: true # Required so that reviewdog can fallback to git command
 
       - name: Lint github actions
