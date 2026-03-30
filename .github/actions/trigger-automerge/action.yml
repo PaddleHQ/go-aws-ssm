@@ -16,7 +16,8 @@ runs:
   using: "composite"
   steps:
     - name: Attempt to automerge
-      if: inputs.hasAutoApproverPrivateKey == 'true' &&
+      if: fromJSON(inputs.event).pull_request != null &&
+          inputs.hasAutoApproverPrivateKey == 'true' &&
           fromJSON(inputs.event).pull_request.merged == false &&
           fromJSON(inputs.event).pull_request.draft == false &&
           fromJSON(inputs.event).pull_request.state == 'open'
@@ -30,7 +31,8 @@ runs:
           }'
 
     - name: Attempt to auto ready for review
-      if: fromJSON(inputs.event).pull_request.draft == true
+      if: fromJSON(inputs.event).pull_request != null &&
+          fromJSON(inputs.event).pull_request.draft == true
       uses: benc-uk/workflow-dispatch@e2e5e9a103e331dad343f381a29e654aea3cf8fc # v1.2.4
       with:
         workflow: auto-ready-for-review.yml
