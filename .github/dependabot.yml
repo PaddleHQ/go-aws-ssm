@@ -8,6 +8,10 @@ updates:
     open-pull-requests-limit: 4
     labels:
       - "release:patch"
+    cooldown:
+      default-days: 7
+      exclude:
+        - "github.com/PaddleHQ/*"
     groups:
       paddlehq:
         patterns:
