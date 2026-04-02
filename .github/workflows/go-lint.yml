@@ -63,6 +63,7 @@ jobs:
           version: v1.64.6
           args: --timeout=${{ steps.build_config.outputs['lintTimeout'] || '5m' }} --out-format github-actions
           verify: false
+          debug: cache
 
       - name: golangci-lint-v2
         if:   steps.lint-config.outputs['version'] == '2'
@@ -71,6 +72,7 @@ jobs:
           version: v2.5.0
           args: --timeout=${{ steps.build_config.outputs['lintTimeout'] || '5m' }}
           verify: false
+          debug: cache
 
       - name: Automerge
         uses: ./.github/actions/trigger-automerge
