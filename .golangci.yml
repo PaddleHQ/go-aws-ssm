@@ -34,9 +34,13 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - /mocks/
+      - \.pb\.go$
       - third_party$
       - builtin$
       - examples$
+      - /mocks/
+      - \.pb\.go$
 linters:
   default: none
   enable:
@@ -158,6 +162,10 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      - /mocks/
+      - \.pb\.go$
       - third_party$
       - builtin$
       - examples$
+      - /mocks/
+      - \.pb\.go$
