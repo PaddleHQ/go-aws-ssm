@@ -36,6 +36,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -65,12 +66,23 @@ jobs:
           verify: false
           debug: cache
 
+      - name: Get changed packages
+        if: steps.lint-config.outputs['version'] == '2'
+        id: changed-pkgs
+        run: |
+          pkgs=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }} -- '*.go' \
+            | xargs -I{} dirname {} \
+            | sort -u \
+            | sed 's|^|./|' \
+            | tr '\n' ' ')
+          echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
+
       - name: golangci-lint-v2
         if:   steps.lint-config.outputs['version'] == '2'
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           version: v2.5.0
-          args: --timeout=${{ steps.build_config.outputs['lintTimeout'] || '5m' }}
+          args: --timeout=${{ steps.build_config.outputs['lintTimeout'] || '5m' }} --new-from-rev=origin/${{ github.event.pull_request.base.ref }} ${{ steps.changed-pkgs.outputs.pkgs }}
           verify: false
           debug: cache
 

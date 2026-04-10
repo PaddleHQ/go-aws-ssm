@@ -31,6 +31,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       testRunner: ${{ steps.build_config.outputs.testRunner }}
+      separateRaceTests: ${{ steps.build_config.outputs['separateRaceTests'] }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -80,6 +81,7 @@ jobs:
 
   test:
     name: Run tests and validate coverage
+    if: needs.read-config.outputs.separateRaceTests == 'true'
     needs:
       - read-config
       - ecr-login
@@ -160,11 +162,9 @@ jobs:
             --format testname \
             --jsonfile test-report.json \
             -- \
-            -v \
             -coverprofile=cover.out \
             -covermode=atomic \
             -coverpkg ./... \
-            -race \
             -buildvcs=true \
             -shuffle=on \
             ./...
@@ -244,6 +244,263 @@ jobs:
               -requiredCoverage: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
               +requiredCoverage: ${{ env.TOTAL_COVERAGE }}
               ```
+
+  test-combined:
+    name: Run tests with coverage and race detector
+    if: needs.read-config.outputs.separateRaceTests != 'true'
+    needs:
+      - read-config
+      - ecr-login
+    runs-on: ubuntu-24.04
+    container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
+    steps:
+      - name: Mask ECR token in logs
+        if: needs.read-config.outputs.testRunner != ''
+        run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
+
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Allow git in workspace (required for Go -buildvcs in container)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+
+      - name: Download external dependencies
+        run: |
+          output_dir=$(dirname "${target}")
+
+          yq '.externalDependencies | @tsv' < build-config.yaml | # Read build config
+            tail -n +2 |                                          # Remove header row
+            while IFS=$'\t' read -r source target; do             # Read each line
+              echo "Copying from ${source} to ${target}"          # Log action
+              mkdir -p "${output_dir}"                            # Ensure target directory exists
+              curl -L -o "${target}" "${source}"                  # Copy the file
+            done
+
+      - name: Cache test results
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-
+            ${{ runner.os }}-go-test-
+
+      - name: Install test dependencies
+        run: |
+          go install gotest.tools/gotestsum@v1.13.0
+          go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@v0.0.14
+
+      - name: Setup test databases
+        uses: ./.github/actions/setup-databases
+
+      - name: Setup Env
+        run: |
+          yq '.env | to_entries | @tsv' < build-config.yaml |
+            tail -n +2 |
+            while IFS=$'\t' read -r source target; do
+                echo "${source}=${target}" >> "$GITHUB_ENV"
+            done
+
+      - name: Run tests with coverage and race detector
+        timeout-minutes: 20
+        env:
+          ENVIRONMENT: ci
+          CGO_ENABLED: 1
+        run: |
+          gotestsum \
+            --format testname \
+            --jsonfile test-report.json \
+            -- \
+            -v \
+            -coverprofile=cover.out \
+            -covermode=atomic \
+            -coverpkg ./... \
+            -race \
+            -buildvcs=true \
+            -shuffle=on \
+            ./...
+
+      - name: Convert test reports to CTRF
+        if: always()
+        run: |
+          cat test-report.json | go-ctrf-json-reporter -quiet -output test-ctrf-report.json || true
+
+      - name: Publish Test Report
+        if: always()
+        uses: ctrf-io/github-test-reporter@31e2a2735dd4641c65c2f49eb07e93ce8ec37fff # v1.0.27
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          report-path: test-ctrf-report.json
+          pull-request-report: true
+          overwrite-comment: true
+          comment-tag: '${{ github.workflow }}-${{ github.event.pull_request.number }}'
+
+      - name: Remove mocks from coverage
+        run: grep -v -e ".\.pb\.go" -e "/mocks" cover.out > cover.filtered.out
+
+      - name: Get total coverage
+        run: |
+          echo "TOTAL_COVERAGE=$(go tool cover -func cover.filtered.out | tail -n 1 | awk '{print substr($3, 1, length($3)-3)}')" \
+            >> "$GITHUB_ENV"
+
+      - name: Read build config
+        id: build_config
+        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+      - name: Calculate target coverage
+        run: |
+          echo "TARGET_COVERAGE=$(( \
+                ${{ steps.build_config.outputs['requiredCoverage'] || 100 }} \
+                + \
+                TARGET_COVERAGE_DIFF \
+              ))" >> "$GITHUB_ENV"
+
+      - name: Ensure coverage is good
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        with:
+          comment-tag: build_coverage
+          mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
+          message: |
+            > [!CAUTION]
+            > ## :cry: Coverage is too low :cry:
+            > Total coverage is `${{ env.TOTAL_COVERAGE }}%` but the required coverage is `${{ steps.build_config.outputs['requiredCoverage'] || 100 }}%`.
+
+              Please add additional tests to increase coverage.
+
+      - name: Fail if coverage is too low
+        if: fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100)
+        run: exit 1
+
+      - name: Comment PR to update build coverage
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        with:
+          comment-tag: build_coverage
+          mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
+          message: |
+            > [!TIP]
+            > ## :heart_eyes: Coverage has improved  :heart_eyes:
+            > You may want to update the coverage configuration in `./build-config.yaml` to:
+              `requiredCoverage: ${{ env.TOTAL_COVERAGE }}`
+
+              ```diff
+              diff --git a/build-config.yaml b/build-config.yaml
+              --- a/build-config.yaml
+              +++ b/build-config.yaml
+              @@ -1,1 +1,1 @@
+              -requiredCoverage: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
+              +requiredCoverage: ${{ env.TOTAL_COVERAGE }}
+              ```
+
+  race:
+    name: Run tests with race detector
+    if: needs.read-config.outputs.separateRaceTests == 'true'
+    needs:
+      - read-config
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+
+      - name: Download external dependencies
+        run: |
+          output_dir=$(dirname "${target}")
+
+          yq '.externalDependencies | @tsv' < build-config.yaml | # Read build config
+            tail -n +2 |                                          # Remove header row
+            while IFS=$'\t' read -r source target; do             # Read each line
+              echo "Copying from ${source} to ${target}"          # Log action
+              mkdir -p "${output_dir}"                            # Ensure target directory exists
+              curl -L -o "${target}" "${source}"                  # Copy the file
+            done
+
+      - name: Cache test results
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-test-race-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            ${{ runner.os }}-go-test-race-${{ hashFiles('**/go.sum') }}-
+            ${{ runner.os }}-go-test-race-
+
+      - name: Setup Env
+        run: |
+          yq '.env | to_entries | @tsv' < build-config.yaml |
+            tail -n +2 |
+            while IFS=$'\t' read -r source target; do
+                echo "${source}=${target}" >> "$GITHUB_ENV"
+            done
+
+      - name: Run tests with race detector
+        timeout-minutes: 20
+        env:
+          ENVIRONMENT: ci
+          CGO_ENABLED: 1
+        run: |
+          mapfile -t test_packages < <(go list ./... | grep -v "^github.com/${{ github.repository }}$")
+
+          go test \
+            -race \
+            -buildvcs=true \
+            -shuffle=on \
+            "${test_packages[@]}"
+
+  automerge_tests:
+    name: Automerge unit tests with and without race detector
+    needs:
+      - test-combined
+      - test
+      - race
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
 
       - name: Automerge
         uses: ./.github/actions/trigger-automerge
