@@ -38,12 +38,14 @@ jobs:
           merge_base=$(git merge-base origin/${{ github.event.pull_request.base.ref }} HEAD)
 
           # 1. Use git diff --shortstat to calculate all changed lines
-          # 2. Exclude go.mod, go.sum and mocks
+          # 2. Exclude go.mod, go.sum, mocks, and generated proto files (Go and PHP)
           # 3. Use awk to sum the added and deleted lines to get total lines changed
           LINES_CHANGED=$(git diff --shortstat "${merge_base}" -- \
             ':!go.mod' \
             ':!go.sum' \
             ':!*/mocks/*' \
+            ':!api/*.pb.go' \
+            ':!clients/php/**' \
             | awk '{files+=$1; inserted+=$4; deleted+=$6} END {print inserted+deleted}')
           echo "total=${LINES_CHANGED}" >> "$GITHUB_OUTPUT"
 
