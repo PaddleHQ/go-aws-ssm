@@ -1,0 +1,4 @@
+case: underscore
+with-expecter: true
+disable-version-string: true
+resolve-type-alias: false

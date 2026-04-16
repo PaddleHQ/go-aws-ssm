@@ -1,0 +1,48 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Ensure code can build
+
+on:
+  merge_group:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+  contents: read
+
+jobs:
+  check_build:
+    name: Ensure code can build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        id: setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}

@@ -1,0 +1,50 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Trigger workflows after Checks complete
+
+# This workflow triggers other workflows after external checks complete
+on:
+  check_run:
+    types:
+      - completed
+
+permissions:
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+  contents: read
+  pull-requests: read
+
+jobs:
+  trigger_workflows_after_checks_complete:
+    name: Trigger workflows after Checks complete
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.check_run.head_sha }}
+          persist-credentials: false
+
+      - name: Get Pull Request Information
+        id: get_pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_DATA=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.check_run.head_sha }}/pulls" --jq '.[0]')
+          if [ "$PR_DATA" = "null" ]; then
+            echo "No pull request found for this commit"
+            echo "pr_data={}" >> "$GITHUB_OUTPUT"
+          else
+            echo "pr_data=$PR_DATA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Automerge
+        if: steps.get_pr.outputs.pr_data != '{}'
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: '{"pull_request":${{ steps.get_pr.outputs.pr_data }}}'
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}

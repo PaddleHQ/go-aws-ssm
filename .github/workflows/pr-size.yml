@@ -1,0 +1,102 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Label PRs with size and comment if too large
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+
+jobs:
+  pr_size:
+    name: Label PRs with size and comment if too large
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Check out code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0 # fetch all history to allow diff
+
+      - name: Calculate lines changed
+        id: lines_changed
+        run: |
+          merge_base=$(git merge-base origin/${{ github.event.pull_request.base.ref }} HEAD)
+
+          # 1. Use git diff --shortstat to calculate all changed lines
+          # 2. Exclude go.mod, go.sum, mocks, and generated proto files (Go and PHP)
+          # 3. Use awk to sum the added and deleted lines to get total lines changed
+          LINES_CHANGED=$(git diff --shortstat "${merge_base}" -- \
+            ':!go.mod' \
+            ':!go.sum' \
+            ':!*/mocks/*' \
+            ':!api/*.pb.go' \
+            ':!clients/php/**' \
+            | awk '{files+=$1; inserted+=$4; deleted+=$6} END {print inserted+deleted}')
+          echo "total=${LINES_CHANGED}" >> "$GITHUB_OUTPUT"
+
+      - name: Label PR with size
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          changed_lines=${{ steps.lines_changed.outputs.total }}
+
+          SIZE=""
+          if [ "${changed_lines}" -lt 50 ]; then
+            SIZE="xs"
+          elif [ "${changed_lines}" -lt 100 ]; then
+            SIZE="s"
+          elif [ "${changed_lines}" -lt 500 ]; then
+            SIZE="m"
+          elif [ "${changed_lines}" -lt 1000 ]; then
+            SIZE="l"
+          else
+            SIZE="xl"
+          fi
+
+          # 1. get all labels
+          # 2. Extract the label name
+          # 3. Filter by size/* and not the current size
+          # 4. remove it
+          gh pr view ${{ github.event.pull_request.number }} \
+              --json labels \
+              -q ".labels[].name | select(. | startswith(\"size/\") and . != \"${SIZE}\")" \
+            | xargs -I {} gh pr edit ${{ github.event.pull_request.number }} --remove-label {}
+
+          # Create the label if it doesn't exist
+          gh label create --repo ${{ github.repository }} "size/${SIZE}" || true
+
+          # Add the label to the PR
+          gh pr edit ${{ github.event.pull_request.number }} --add-label "size/${SIZE}"
+
+      - name: Comment PR to warn about PR size
+        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        with:
+          comment-tag: very_large_pr
+          mode: ${{ steps.lines_changed.outputs.total >= 1000 && 'upsert' || 'delete' }}
+          message: |
+            > [!IMPORTANT]
+            > ## :warning: PR is very large :warning:
+            >
+            > This PR exceeds the recommended size of 1,000 lines. Please make sure you are NOT addressing multiple
+            > issues with one PR. Note this PR might be rejected due to its size.
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}

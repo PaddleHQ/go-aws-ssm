@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: /
+    schedule:
+      interval: "daily"
+      time: "03:00"
+    open-pull-requests-limit: 4
+    labels:
+      - "release:patch"
+    cooldown:
+      default-days: 7
+      exclude:
+        - "github.com/PaddleHQ/*"
+    groups:
+      paddlehq:
+        patterns:
+          - "github.com/PaddleHQ/*"
+      aws:
+        patterns:
+          - "github.com/aws/aws-sdk-go-v2/*"
+      otel:
+        patterns:
+          - "go.opentelemetry.io/otel/*"
+      otelcontrib-do-not-merge:
+        patterns:
+          - "go.opentelemetry.io/contrib/*"

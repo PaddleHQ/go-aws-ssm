@@ -1,0 +1,66 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+name: Check for blocking labels
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+
+env:
+  BLOCKING_LABELS: do not merge,do-not-merge,wip,work in progress,work-in-progress,needs review,needs-review,draft,hold,blocked
+
+jobs:
+  check_blocking_labels:
+    name: Check for blocking labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const blockingLabels = process.env.BLOCKING_LABELS.split(",");
+            const blockingLabelsSet = new Set(blockingLabels);
+            const { data: labelResultList } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const prLabels = labelResultList.map(label => label.name);
+            const foundBlockingLabels = prLabels.filter(value => blockingLabelsSet.has(value));
+
+            core.info(`Blocking labels: ${blockingLabels.join(" | ")}`);
+            core.info(`PR labels: ${prLabels.join(" | ")}`);
+            core.info(`Found blocking labels: ${foundBlockingLabels.join(" | ")}`);
+
+            if (foundBlockingLabels.length > 0) {
+              core.setFailed(`🚫 Merge blocked due to blocking label(s): ${foundBlockingLabels.join(", ")}`);
+            } else {
+              core.info("✅ No blocking labels found - merge allowed");
+            }
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
