@@ -1,22 +1,171 @@
-run:
-  tests: false
-issues:
-  exclude-use-default: false
+## This file should only be updated in the coding-standards (https://github.com/PaddleHQ/coding-standards/) repo.
+## Changes will automatically generate a PR into all the go services and libraries
 
-linters:
-  disable-all: true
+## This file should only be updated in the coding-standards (https://github.com/PaddleHQ/coding-standards/) repo.
+## Changes will automatically generate a PR into all the go services and libraries
+version: "2"
+run:
+  tests: true
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
   enable:
-    - govet
-    - errcheck
-    - staticcheck
-    - unused
-    - gosimple
-    - structcheck
-    - varcheck
-    - ineffassign
-    - deadcode
-    - typecheck
-    - gosec
-    - gocyclo
+    - gci
     - gofmt
-    - golint
+    - gofumpt
+  settings:
+    gci:
+      sections:
+        - standard
+        - localmodule
+        - prefix(github.com/PaddleHQ)
+        - default
+      custom-order: true
+    gofmt:
+      simplify: true
+      rewrite-rules:
+        - pattern: interface{}
+          replacement: any
+        - pattern: a[b:len(a)]
+          replacement: a[b:]
+  exclusions:
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - /mocks/
+      - \.pb\.go$
+      - third_party$
+      - builtin$
+      - examples$
+      - /mocks/
+      - \.pb\.go$
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - containedctx
+    - copyloopvar
+    - cyclop
+    - dogsled
+    - durationcheck
+    - err113
+    - errcheck
+    - errname
+    - exhaustive
+    - forbidigo
+    - forcetypeassert
+    - funlen
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - gosec
+    - govet
+    - ineffassign
+    - lll
+    - makezero
+    - misspell
+    - nestif
+    - nilerr
+    - noctx
+    - prealloc
+    - predeclared
+    - revive
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - staticcheck
+    - testifylint
+    - testpackage
+    - unconvert
+    - unparam
+    - unused
+    - usetesting
+    - wastedassign
+    - whitespace
+    - nilnil
+    - wrapcheck
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      disabled-checks:
+        - hugeParam
+        - paramTypeCombine
+      enabled-tags:
+        - diagnostic
+        - opinionated
+        - performance
+        - style
+    godot:
+      exclude:
+        # go-relish uses comments to auto-generate code, these lines should not end with a `.`
+        - '@(Given|When|Then|And|But) (.*)'
+    gosec:
+      excludes:
+        - G115
+    lll:
+      line-length: 140
+    misspell:
+      locale: US
+      ignore-rules:
+        - localised
+        - catalogue
+        - authorised
+    sloglint:
+      context: all
+      static-msg: true
+      key-naming-case: kebab
+    staticcheck:
+      checks:
+        - all
+        - -QF1008
+    spancheck:
+      checks:
+        - end
+        - record-error
+        - set-status
+    testifylint:
+      disable:
+        - require-error
+    wrapcheck:
+      ignore-package-globs:
+        - github.com/PaddleHQ/*
+  exclusions:
+    rules:
+      - linters:
+          - bodyclose
+          - containedctx
+          - copyloopvar
+          - cyclop
+          - dogsled
+          - err113
+          - exhaustive
+          - forcetypeassert
+          - funlen
+          - gocognit
+          - goconst
+          - gocyclo
+          - gosec
+          - lll
+          - nestif
+        path: _test\.go
+      - linters:
+          - nilnil
+          - wrapcheck
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - /mocks/
+      - \.pb\.go$
+      - third_party$
+      - builtin$
+      - examples$
+      - /mocks/
+      - \.pb\.go$

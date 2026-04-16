@@ -1,0 +1,429 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+# This workflow automatically approves and merges safe pull requests created by Dependabot, or automatic PRs from
+# paddle-config and go-library-template repositories.
+
+name: Auto Approve and Merge
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        # This is used to fetch the PR to determine if it is safe to merge
+        # It is safe as an input
+        description: 'Number of the pull request'
+        required: true
+        type: string
+      workflow:
+        # This is used to wait for the workflow to complete before running further actions
+        # It is safe as an input
+        description: 'Name of the workflow that triggered this action'
+        required: false
+        type: string
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+permissions:
+  checks: read
+  contents: read
+  pull-requests: write
+
+jobs:
+  # --
+  # Get PR info
+
+  pr_info:
+    name: "Get PR Info"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Check sender
+        env:
+          SENDER: ${{ github.event.sender.login }}
+        run: |
+          if [[ "${SENDER}" != 'github-actions[bot]' ]]; then
+            echo "❌ This action can not be triggered by a user"
+            exit 1
+          fi
+
+      - name: "📥 Checkout Default Branch"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: "🔍 Get PR Info"
+        id: pr-info
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR=$(gh pr view ${{ github.event.inputs.pr_number }} --json isDraft,author,labels,headRefName,baseRefName)
+
+          {
+            echo "draft=$(echo "${PR}" | jq -r '.isDraft')"
+            echo "user_login=$(echo "${PR}" | jq -r '.author.login')"
+            echo "labels=$(echo "${PR}" | jq -r '.labels | map(.name) | join(",")')"
+            echo "head_ref=$(echo "${PR}" | jq -r '.headRefName')"
+            echo "base_ref=$(echo "${PR}" | jq -r '.baseRefName')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.pr-info.outputs.head_ref }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: "⛙ Get Merge Info"
+        id: merge-base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get the merge base to determine the changes made in the PR compared to when it was branched from the
+          # default branch, instead of the diff to the default branch.
+          mergeBase=$(git merge-base origin/${{ steps.pr-info.outputs.base_ref }} HEAD)
+          echo "merge_base=${mergeBase}" >> "$GITHUB_OUTPUT"
+
+    outputs:
+      draft: ${{ steps.pr-info.outputs.draft }}
+      user_login: ${{ steps.pr-info.outputs.user_login }}
+      labels: ${{ steps.pr-info.outputs.labels }}
+      head_ref: ${{ steps.pr-info.outputs.head_ref }}
+      merge_base: ${{ steps.merge-base.outputs.merge_base }}
+
+
+  # --
+  # Wait for the PR to be ready for automerge
+  wait_for_ready:
+    name: Check source and wait for PR to be ready
+    runs-on: ubuntu-latest
+    needs:
+      - pr_info
+
+    if: |-
+      needs.pr_info.outputs.draft == 'false' && (
+        needs.pr_info.outputs.user_login == 'app/dependabot' ||
+        needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' ||
+        needs.pr_info.outputs.user_login == 'app/paddle-renovate'
+      )
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: "🔐 Verify Automerge Secret Available"
+        id: check-secret
+        run: |
+          if [ -z "${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}" ]; then
+            echo "❌ No automerge secret found - automerge disabled"
+          else
+            echo "✅ Automerge secret available"
+            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: "🔄 Wait for calling workflow to be ready"
+        if: |-
+          steps.check-secret.outputs.can_automerge == 'true' &&
+          github.event.inputs.workflow != ''
+        uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
+        id: check-caller
+        continue-on-error: true
+        with:
+          delay: '0'
+          poll: true
+          checks_include: ${{ github.event.inputs.workflow }}
+
+      - name: "⏳ Wait for All Required Checks to Pass"
+        if: |-
+          steps.check-secret.outputs.can_automerge == 'true' &&
+          steps.check-caller.outcome == 'success'
+        uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
+        id: check-all
+        continue-on-error: true
+        with:
+          delay: '0'
+          poll: false
+          checks_exclude: (\[Automerge\/.*\]|StepSecurity).*
+
+      - name: "✅ Confirm Automerge Eligibility"
+        id: check-failure
+        if: |-
+          steps.check-secret.outputs.can_automerge == 'true' &&
+          steps.check-caller.outcome == 'success' &&
+          steps.check-all.outcome == 'success'
+        run: |
+          echo "✅ All checks passed - automerge enabled"
+          echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+
+    outputs:
+      can_automerge: ${{ steps.check-secret.outputs.can_automerge && steps.check-failure.outputs.can_automerge }}
+
+  # --
+  # Check the source and the changes of the PR
+  # One of the following jobs must pass for the PR to be merged automatically
+
+  check_dependabot_changes:
+    name: "[Automerge/Check] 🤖 Validate Dependabot Changes"
+    needs:
+      - pr_info
+      - wait_for_ready
+    runs-on: ubuntu-latest
+
+    if: |-
+      needs.wait_for_ready.outputs.can_automerge == 'true' &&
+      needs.pr_info.outputs.user_login == 'app/dependabot'
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.pr_info.outputs.head_ref }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: "🔍 Analyze Dependency Changes"
+        id: check-external
+        run: |
+          echo "🔍 Checking dependency changes in go.mod..."
+          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- 'go.mod'; then
+            echo "ℹ️ No changes in go.mod - automerge not enabled. Requires manual review"
+            echo "can_automerge=false" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet -G "github.com/PaddleHQ/" ${{ needs.pr_info.outputs.merge_base }} -- go.mod; then
+            echo "⚠️ No PaddleHQ dependencies updated - automerge not enabled. Requires manual review"
+          else
+            echo "✅ PaddleHQ dependencies updated - automerge enabled"
+            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+          fi
+
+    outputs:
+      can_automerge: ${{ steps.check-external.outputs.can_automerge }}
+
+  check_library_template_changes:
+    name: "[Automerge/Check] 📝 Check GO Library Template changes"
+    needs:
+      - pr_info
+      - wait_for_ready
+    runs-on: ubuntu-latest
+
+    if: |-
+      needs.wait_for_ready.outputs.can_automerge == 'true' &&
+      needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
+      (
+        contains(needs.pr_info.outputs.labels, 'origin:go-library-template') ||
+        contains(needs.pr_info.outputs.labels, 'origin:php-library-template') ||
+        contains(needs.pr_info.outputs.labels, 'origin:example-service')
+      )
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.pr_info.outputs.head_ref }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: "🔍 Analyze Go Library Template Changes"
+        id: check-files
+        run: |
+          echo "🔍 Checking which files were modified by from a library template sync..."
+          # Check if only safe files were modified (workflows and dependabot config)
+          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- ':!.github/actions' ':!.github/workflows' ':!.github/dependabot.yml' ':!.github/pull_request_template.md' ':!.github/release.yml'; then
+            echo "✅ Only safe template files modified (workflows/dependabot) - automerge enabled"
+            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️ Updates to non-standard files - automerge not enabled. Requires manual review"
+          fi
+
+    outputs:
+      can_automerge: ${{ steps.check-files.outputs.can_automerge }}
+
+  check_paddle_config_changes:
+    name: "[Automerge/Check] ⚙️ Check Paddle Config Changes"
+    needs:
+      - pr_info
+      - wait_for_ready
+    runs-on: ubuntu-latest
+
+    if: |-
+      needs.wait_for_ready.outputs.can_automerge == 'true' &&
+      needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
+      contains(needs.pr_info.outputs.labels, 'origin:paddle-config')
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.pr_info.outputs.head_ref }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: "📖 Read Build Configuration"
+        id: build_config
+        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+      - name: "🔍 Analyze Paddle Config Changes"
+        id: check-additions
+        if: steps.build_config.outputs['automergePaddleConfig'] == 'true'
+        run: |
+          echo "🔍 Checking for file deletions in config sync..."
+          LINES_DELETED=$(git diff --shortstat ${{ needs.pr_info.outputs.merge_base }} \
+            | awk '{files+=$1; inserted+=$4; deleted+=$6} END {print deleted}')
+
+          if [ "$LINES_DELETED" -gt 0 ]; then
+            echo "⚠️ Files deleted - automerge not enabled. Needs manual review"
+          else
+            echo "✅ No files deleted (only additions/modifications) - automerge enabled"
+            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+          fi
+
+    outputs:
+      can_automerge: ${{ steps.check-additions.outputs.can_automerge }}
+
+  check_renovate_changes:
+    name: "[Automerge/Check] ⚙️ Check Renovate Changes"
+    needs:
+      - pr_info
+      - wait_for_ready
+    runs-on: ubuntu-latest
+
+    if: |-
+      needs.wait_for_ready.outputs.can_automerge == 'true' &&
+      needs.pr_info.outputs.user_login == 'app/paddle-renovate' &&
+      (
+        contains(needs.pr_info.outputs.labels, 'origin:outboxer') ||
+        contains(needs.pr_info.outputs.labels, 'origin:queue-relay')
+      )
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.pr_info.outputs.head_ref }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: "📖 Read Build Configuration"
+        id: build_config
+        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+      - name: "🔍 Analyze Template Changes"
+        id: check-files
+        run: |
+          echo "🔍 Checking which files were modified by from a library template sync..."
+          # Check if only safe files were modified (workflows and dependabot config)
+          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- ':!*.yaml.tmpl'; then
+            echo "✅ Only safe template files modified - automerge enabled"
+            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️ Updates to non-standard files - automerge not enabled. Requires manual review"
+          fi
+
+    outputs:
+      can_automerge: ${{ steps.check-files.outputs.can_automerge }}
+
+  # --
+  # If automerge is enabled then approve and merge the PR
+
+  automerge:
+    name: "[Automerge/Merge] 🚀 Auto Approve and Merge"
+    runs-on: ubuntu-latest
+
+    needs:
+      - pr_info
+      - wait_for_ready
+      - check_dependabot_changes
+      - check_library_template_changes
+      - check_paddle_config_changes
+      - check_renovate_changes
+
+    # Run if any of the check jobs approved automerge
+    # always() ensures this is a `or` condition and does not depend on ALL the checks passing, but only one.
+    if: |-
+      always() && (
+        needs.check_dependabot_changes.outputs.can_automerge == 'true' ||
+        needs.check_library_template_changes.outputs.can_automerge == 'true' ||
+        needs.check_paddle_config_changes.outputs.can_automerge == 'true' ||
+        needs.check_renovate_changes.outputs.can_automerge == 'true'
+      )
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.pr_info.outputs.head_ref }}
+          persist-credentials: false
+
+      - name: "📖 Read Build Configuration"
+        id: build_config
+        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        continue-on-error: true
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+      - name: "🔑 Generate GitHub App Token"
+        id: generate-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: 1045853
+          private-key: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}
+
+      - name: "✅ Auto Approve PR"
+        if: steps.build_config.outputs['approveBotEnabled'] == 'true'
+        run: gh pr review --approve "${{ github.event.inputs.pr_number }}"
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+
+      - name: "🔀 Auto Merge PR"
+        if: steps.build_config.outputs['mergeBotEnabled'] == 'true'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          echo "🔀 Attempting direct merge..."
+          if MERGE_OUTPUT=$(gh pr merge --admin --squash "${{ github.event.inputs.pr_number }}" 2>&1); then
+            echo "✅ PR merged successfully"
+          elif echo "$MERGE_OUTPUT" | grep -q "merge queue"; then
+            echo "🚂 Merge queue required, adding PR to queue..."
+            gh pr merge --squash "${{ github.event.inputs.pr_number }}"
+          else
+            echo "❌ Merge failed:"
+            echo "$MERGE_OUTPUT"
+            exit 1
+          fi

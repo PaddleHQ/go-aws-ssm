@@ -1,0 +1,43 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Push Markdown to Notion
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read # Read access to the repository contents is required to read the Markdown files.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  push_markdown_job:
+    runs-on: ubuntu-latest
+    name: Push Markdown to Notion
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@95d9a5deda9de15063e7595e9719c11c38c90ae2 # v2.13.2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Push Markdown to Notion
+        env:
+          NOTION_ACCESS_TOKEN: ${{ secrets.NOTION_ACCESS_TOKEN }}
+        if: env.NOTION_ACCESS_TOKEN != null
+        uses: step-security/push-md-to-notion@d85b726c0b1f4c05624cacdc959e48f381ea0989 # v1.1.0
+        with:
+          notion-token: ${{ secrets.NOTION_ACCESS_TOKEN }}
+          dry-run: ${{ format('refs/heads/{0}', github.event.repository.default_branch) != github.ref }}

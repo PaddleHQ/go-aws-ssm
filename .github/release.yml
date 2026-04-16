@@ -1,0 +1,14 @@
+changelog:
+  categories:
+    - title: Breaking Changes 🛠
+      labels:
+        - release:major
+    - title: Exciting New Features 🎉
+      labels:
+        - release:minor
+    - title: Bug Fixes and Dependency Updates 🐛
+      labels:
+        - release:patch
+    - title: Other Changes
+      labels:
+        - "*"

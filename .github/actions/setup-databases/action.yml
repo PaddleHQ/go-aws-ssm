@@ -1,0 +1,74 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Setup Databases
+description: |
+  This action starts and configures any databases required for testing, and exports the DSN for `go-testament` to use.
+  Use `enableMySQL: true` in your `build-config.yaml` to enable MySQL.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check if testament is a dependency
+      id: go_testament
+      shell: bash
+      run: |
+        HAS_TESTAMENT=$(\
+          go list -m -f '{{if not .Indirect}}{{.Path}}{{end}}' all | \
+          tail -n +2 | \
+          grep -E '^github.com/PaddleHQ/go-testament(/v[0-9]+)?$' || true\
+        )
+
+        if [[ -z "${HAS_TESTAMENT}" ]]; then
+          echo "imported=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "imported=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Read build config
+      id: build_config
+      uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+      with:
+        config: ${{ github.workspace }}/build-config.yaml
+
+    - name: Start PostgreSQL
+      if: steps.go_testament.outputs.imported == 'true'
+      shell: bash
+      run: |
+        sudo systemctl start postgresql.service
+        pg_isready
+        sudo -u postgres psql -c "ALTER SYSTEM SET max_connections TO '2000';"
+        sudo -u postgres psql -c "SELECT pg_reload_conf();"
+        sudo systemctl restart postgresql.service
+        pg_isready
+
+        sudo -u postgres psql -c "CREATE USER runner WITH SUPERUSER CREATEDB REPLICATION PASSWORD 'hunter2'"
+        sudo -u postgres psql -c "CREATE DATABASE testdatabase WITH OWNER runner"
+
+        echo "TESTAMENT_POSTGRES_DSN=host=127.0.0.1 port=5432 user=runner password=hunter2 dbname=testdatabase sslmode=require" >> "$GITHUB_ENV"
+
+        # deprecated, can be removed once all repos have updated to `go-testament` >= v3.3
+        echo "TESTAMENT_POSTGRES_16_DSN=host=127.0.0.1 port=5432 user=runner password=hunter2 dbname=testdatabase sslmode=require" >> "$GITHUB_ENV"
+
+    - name: Start MySQL
+      if: steps.build_config.outputs['enableMySQL'] == 'true'
+      shell: bash
+      run: |
+        # Optimise MySQL for CI: trade durability for speed
+        sudo systemctl stop mysql.service
+        cat <<EOF | sudo tee /etc/mysql/conf.d/ci.cnf
+        [mysqld]
+        skip-log-bin
+        innodb_flush_log_at_trx_commit=0
+        sync_binlog=0
+        innodb_doublewrite=0
+        innodb_flush_method=nosync
+        EOF
+
+        sudo systemctl start mysql.service
+        sudo mysql --user=root --password=root -e "CREATE USER 'runner'@'localhost' IDENTIFIED BY 'hunter2';"
+        sudo mysql --user=root --password=root -e "GRANT ALL PRIVILEGES ON *.* TO 'runner'@'localhost' WITH GRANT OPTION;"
+        sudo mysql --user=root --password=root -e "CREATE DATABASE testdatabase;"
+        sudo mysql --user=root --password=root -e "FLUSH PRIVILEGES;"
+
+        echo "TESTAMENT_MYSQL_8_DSN=runner:hunter2@tcp(127.0.0.1:3306)/testdatabase?tls=false" >> "$GITHUB_ENV"
+

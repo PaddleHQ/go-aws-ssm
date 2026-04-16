@@ -1,0 +1,123 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+# This workflow automatically changes the status of the PR to ready for review if it is draft and has the label:auto-ready-for-review
+
+name: AutoReady for Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        # This is used to fetch the PR to determine if it is ready for review
+        # It is safe as an input
+        description: 'Number of the pull request'
+        required: true
+        type: string
+      head_sha:
+        # This is used to fetch the code for allcheckspassed to work
+        # It is safe as an input
+        description: 'Head SHA of the pull request'
+        required: true
+        type: string
+      workflow:
+        # This is used to wait for the workflow to complete before running further actions
+        # It is safe as an input
+        description: 'Name of the workflow that triggered this action'
+        required: false
+        type: string
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.inputs.pr_number }}
+  cancel-in-progress: true
+
+permissions:
+  checks: read
+  contents: read
+  pull-requests: write # required for `auto-ready-for-review` to mark the PR as ready for review
+
+jobs:
+
+  auto_ready_for_review:
+    name: "AutoReady for Review"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.head_sha }}
+          persist-credentials: false
+
+      - name: "🧠 Check label:auto-ready-for-review is present and draft status is true"
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+            set -euo pipefail
+            pr_json="$(gh pr view ${{ inputs.pr_number }} --json isDraft,labels)"
+            is_draft="$(echo "$pr_json" | jq -r '.isDraft')"
+            has_label="$(echo "$pr_json" | jq -r '.labels | map(.name) | index("auto-ready-for-review") | if . == null then "false" else "true" end')"
+
+            # set ok=true if is_draft is true and has_label is true
+            if [ "$is_draft" = "true" ] && [ "$has_label" = "true" ]; then
+              echo "ok=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "ok=false" >> "$GITHUB_OUTPUT"
+            fi
+
+      - name: "⏳ Wait for calling workflow to be ready"
+        if: |-
+          steps.gate.outputs.ok == 'true' &&
+          github.event.inputs.workflow != ''
+        uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
+        id: check-caller
+        with:
+          delay: '0'
+          poll: true
+          verbose: true
+          commit_sha: ${{ inputs.head_sha }}
+          checks_include: ${{ github.event.inputs.workflow }}
+
+      - name: "⏳ Wait for All Required Checks to Pass"
+        if: |-
+          steps.gate.outputs.ok == 'true' &&
+          steps.check-caller.outcome == 'success'
+        uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
+        id: check-all
+        with:
+          delay: '0'
+          verbose: true
+          poll: false
+          commit_sha: ${{ inputs.head_sha }}
+          checks_exclude: (AutoReady|StepSecurity).*
+
+      - name: "🔑 Generate GitHub App Token" # github.token doesn't have permission to mark PR ready for review :(
+        id: generate-token
+        if: steps.gate.outputs.ok == 'true' && steps.check-all.outcome == 'success'
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v1
+        with:
+          app-id: 1045853
+          private-key: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}
+
+      - name: "🔄 Mark PR ready for review" # github.token doesn't have permission to mark PR ready for review :(
+        if: steps.gate.outputs.ok == 'true' && steps.check-all.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        shell: bash
+        run: |
+          gh pr ready "${{ inputs.pr_number }}"
+
+      - name: "🧹 Remove auto label"
+        if: steps.gate.outputs.ok == 'true' && steps.check-all.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh pr edit "${{ inputs.pr_number }}" --remove-label "auto-ready-for-review"

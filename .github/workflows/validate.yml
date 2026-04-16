@@ -1,0 +1,207 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Run code validation checks
+
+on:
+  merge_group:
+  pull_request:
+
+env:
+  # Required to enable support for synctest.Run
+  # This will be removed once we update to go 1.25
+  GOEXPERIMENT: synctest
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+
+jobs:
+  validate:
+    name: Run code validation checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+          fetch-depth: 0 # fetch all history to allow diff
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        id: setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+
+      - name: Cache go modules
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-validate-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
+          restore-keys: |
+            ${{ runner.os }}-go-validate-${{ hashFiles('**/go.sum') }}-
+            ${{ runner.os }}-go-validate-
+
+      - name: Install `govulncheck`, `gopls`, `modfmt` and `ghokin`
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.20.0
+          go install github.com/abhijit-hota/modfmt@v0.0.0-20260105113844-287023c3d905
+          go install github.com/PaddleHQ/ghokin/v4@1a4a51e4fc32c59c88d7eb7e4835636641a54b0f # v4.1.1
+
+      - name: Setup test databases
+        uses: ./.github/actions/setup-databases
+
+      #  --
+      # Run validations
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Validate go.mod
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          go mod tidy -go=${{ steps.setup-go.outputs.go-mod-version }}
+          git diff --exit-code || \
+            (
+              echo '::error file=go.mod,line=1,endLine=1,title=Incorrect dependencies::Please run "go mod tidy"' \
+              && exit 1
+            )
+
+      - name: Check for toolchain
+        run: |
+          LINE=$(grep -n 'toolchain go' go.mod | cut -f1 -d:)
+          if [ -n "$LINE" ]; then
+            echo "::error file=go.mod,line=$LINE,endLine=$LINE,title=Toolchain::go.mod contains a toolchain directive. This should be removed before merge"
+            exit 1
+          fi
+
+      - name: Validate go.mod blocks
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          modfmt --check || \
+            (
+              echo '::error file=go.mod,line=1,endLine=1,title=Incorrect formatting of go.mod::Please run "go run github.com/abhijit-hota/modfmt@latest --in-place"' \
+              && exit 1
+            )
+
+      - name: Go Format
+        run: |
+          gofmt -s -w .
+          git diff --exit-code ||
+            (echo '::error title=Incorrect Go Format::Please run "gofmt -s -w ."' && exit 1)
+
+      - name: Go Generate
+        run: |
+          go generate ./...
+          git diff --exit-code || \
+            (echo '::error title=Incorrect Generated Files::Please run "go generate ./..."' && exit 1)
+
+      - name: Check feature file formatting
+        run: |
+          [ -d "features/" ] || exit 0
+          ghokin check features/ || \
+            (echo '::error title=Incorrect feature file formatting::Please run "go run github.com/PaddleHQ/ghokin/v4@1a4a51e4fc32c59c88d7eb7e4835636641a54b0f fmt replace features/" to fix' && exit 1)
+
+      # --
+      # Go Vulncheck
+
+      - name: Run `govulncheck`
+        id: govulncheck
+        shell: bash {0} # disable fast fail / set -e
+        run: |
+          result=$(govulncheck ./...)
+          retVal=$?
+          if [ ${retVal} -ne 0 ]; then
+            {
+              echo 'result<<EOF'
+              echo "${result}" | awk '{print "> "$0}'
+              echo EOF
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment PR with vulnerabilities
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        with:
+          comment-tag: govulncheck
+          mode: ${{ steps.govulncheck.outputs.result != '' && 'upsert' || 'delete' }}
+          message: |
+            > [!IMPORTANT]
+            > ## :warning: Found vulnerabilities :warning:
+            > ```
+            ${{ steps.govulncheck.outputs.result }}
+            > ```
+
+      # --
+      # Gopls
+
+      - name: Run `modernize (part of gopls)`
+        run: |
+          modernize -test ./... 2>&1 | awk -F ":" '{print "::notice file="$1",line="$2",title=gopls: "$4"::Use `go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest -test -fix ./...` to automatically fix"}'
+
+      - name: Vet
+        run: go vet ./...
+
+      # --
+      # Breaking changes
+
+      - name: Check for multiple major versions of dependencies
+        run: |
+          if git diff --quiet "origin/${{ github.event.repository.default_branch }}" -- 'go.mod'; then
+            echo "No changes in go.mod - skipping validation of major changes"
+            exit 0
+          fi
+
+          # 1. get all PaddleHQ dependencies
+          # 2. change : to space
+          # 3. remove anything after the last space
+          # 4. remove /v[0-9] from the end of the line
+          # 5. sort by dependency name
+          # 6. find duplicates
+          # 7. print line number and dependency name
+          DUPLICATES=$(\
+            grep -Eon "github.com\/PaddleHQ\/[0-9a-z\-]+.*\s" go.mod \
+            | sed 's/:/ /' \
+            | awk '{print $1 " " $2}' \
+            | sed 's/\/v[0-9]$//' \
+            | sort -k2 \
+            | uniq -f1 -cd \
+            | awk '{print $2 " " $3}' \
+          )
+
+          if [ -n "${DUPLICATES}" ]; then
+            echo "${DUPLICATES}" | while read -r line ; do
+                LINE=$(echo "$line" | cut -f1 -d ' ')
+                REPO=$(echo "$line" | cut -f2 -d ' ')
+
+                cat <<- EOF
+          ::error file=go.mod,line=${LINE},endLine=${LINE},title=Duplicate dependencies::There are multiple \
+          different major versions of ${REPO} in this repo. This may cause problems. We strongly recommend \
+          reaching out to the AppEx team to discuss before merging.
+          EOF
+            done
+          fi
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}

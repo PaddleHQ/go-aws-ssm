@@ -1,0 +1,81 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Check for major dependency updates
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+
+jobs:
+  major:
+    name: Check for major dependency updates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          clear-token: 'false'
+
+      - name: Install `gomajor`
+        run: go install github.com/icholy/gomajor@4439c423d4f92ed1214c2a51750b6c34c4c70aa6 # v0.14.0
+
+      - name: Run `gomajor`
+        id: gomajor
+        env:
+          GOPRIVATE: github.com/PaddleHQ/*
+        run: |
+          # mockery v2 is ignored while we make a decision on how we upgrade.
+          # see https://paddle.slack.com/archives/CCALA6J23/p1744297603199989
+          go_path=$(go env GOPATH)
+          export PATH=${PATH}:${go_path}/bin
+          {
+            echo 'major_dependencies<<EOF'
+            gomajor list -major -pre | grep -v github.com/vektra/mockery/v2 | awk '{print "> "$0}'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Remove git token from cache
+        shell: bash
+        run: git credential-cache exit
+
+      - name: Comment PR to update major dependencies
+        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        with:
+          comment-tag: major_dependencies
+          mode: ${{ steps.gomajor.outputs.major_dependencies != '' && 'upsert' || 'delete' }}
+          message: |
+            > [!IMPORTANT]
+            > ## :warning: Major dependencies need updating :warning:
+            >
+            > The following major dependencies are outdated:
+            > ```
+            ${{ steps.gomajor.outputs.major_dependencies }}
+            > ```
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}

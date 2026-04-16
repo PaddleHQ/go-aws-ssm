@@ -1,4 +1,4 @@
-package awsssm
+package awsssm //nolint:testpackage // tests access unexported types
 
 import (
 	"bytes"

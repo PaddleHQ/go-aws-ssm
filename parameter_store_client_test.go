@@ -1,4 +1,4 @@
-package awsssm
+package awsssm //nolint:testpackage // tests access unexported types
 
 import (
 	"errors"
@@ -19,7 +19,7 @@ var param2 = new(ssm.Parameter).
 	SetValue("rds.something.aws.com").
 	SetARN("arn:aws:ssm:us-east-2:aws-account-id:/my-service/dev/DB_HOST")
 
-// return s.GetParametersByPathOutput, s.GetParametersByPathError
+// return s.GetParametersByPathOutput, s.GetParametersByPathError.
 var param3 = new(ssm.Parameter).
 	SetName("/my-service/dev/DB_USERNAME").
 	SetValue("username").
@@ -40,7 +40,7 @@ type stubSSMClient struct {
 	PutParameterInputReceived *ssm.PutParameterInput
 }
 
-func (s *stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error {
+func (s *stubSSMClient) GetParametersByPathPages(_ *ssm.GetParametersByPathInput, fn func(*ssm.GetParametersByPathOutput, bool) bool) error {
 	if s.GetParametersByPathError == nil {
 		for _, output := range s.GetParametersByPathOutput {
 			done := fn(&output.Output, output.MoreParamsLeft)
@@ -52,12 +52,12 @@ func (s *stubSSMClient) GetParametersByPathPages(input *ssm.GetParametersByPathI
 	return s.GetParametersByPathError
 }
 
-func (s *stubSSMClient) GetParameter(input *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
+func (s *stubSSMClient) GetParameter(_ *ssm.GetParameterInput) (*ssm.GetParameterOutput, error) {
 	return s.GetParameterOutput, s.GetParameterError
 }
 
-// we return nothing becuase the actual response is pretty boring. Just a version number. We DO
-// want to track was is input because there is a _little_ business logic around that
+// we return nothing because the actual response is pretty boring. Just a version number. We DO
+// want to track what is input because there is a _little_ business logic around that.
 func (s *stubSSMClient) PutParameter(input *ssm.PutParameterInput) (*ssm.PutParameterOutput, error) {
 	s.PutParameterInputReceived = input
 	return nil, nil
@@ -119,7 +119,6 @@ func TestClient_GetParametersByPath(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-
 			client := NewParameterStoreWithClient(test.ssmClient)
 			parameters, err := client.GetAllParametersByPath(test.path, true)
 			if err != test.expectedError {
@@ -182,7 +181,6 @@ func TestParameterStore_GetParameter(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-
 			client := NewParameterStoreWithClient(test.ssmClient)
 			parameter, err := client.GetParameter(test.parameterName, true)
 			if err != test.expectedError {
