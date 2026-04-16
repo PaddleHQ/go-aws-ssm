@@ -1,19 +1,21 @@
+// Package awsssm provides a client for AWS Systems Manager Parameter Store.
 package awsssm
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 
 	"github.com/mitchellh/mapstructure"
 )
 
-// Parameter holds a Systems Manager parameter from AWS Parameter Store
+// Parameter holds a Systems Manager parameter from AWS Parameter Store.
 type Parameter struct {
 	Value *string
 }
 
-// GetValue return the actual Value of the parameter
+// GetValue return the actual Value of the parameter.
 func (p *Parameter) GetValue() string {
 	if p.Value == nil {
 		return ""
@@ -21,7 +23,7 @@ func (p *Parameter) GetValue() string {
 	return *p.Value
 }
 
-// NewParameters creates a Parameters
+// NewParameters creates a Parameters.
 func NewParameters(basePath string, parameters map[string]*Parameter) *Parameters {
 	return &Parameters{
 		basePath:   basePath,
@@ -29,7 +31,7 @@ func NewParameters(basePath string, parameters map[string]*Parameter) *Parameter
 	}
 }
 
-// Parameters holds the output and all AWS Parameter Store that have the same base path
+// Parameters holds the output and all AWS Parameter Store that have the same base path.
 type Parameters struct {
 	readIndex  int64
 	bytesJSON  []byte
@@ -37,12 +39,12 @@ type Parameters struct {
 	parameters map[string]*Parameter
 }
 
-// Read implements the io.Reader interface for the key/value pair
+// Read implements the io.Reader interface for the key/value pair.
 func (p *Parameters) Read(des []byte) (n int, err error) {
 	if p.bytesJSON == nil {
 		p.bytesJSON, err = json.Marshal(p.getKeyValueMap())
 		if err != nil {
-			return 0, err
+			return 0, fmt.Errorf("marshaling parameters: %w", err)
 		}
 	}
 
@@ -58,7 +60,7 @@ func (p *Parameters) Read(des []byte) (n int, err error) {
 }
 
 // GetValueByName returns the value based on the name
-// so the AWS Parameter Store parameter name is base path + name
+// so the AWS Parameter Store parameter name is base path + name.
 func (p *Parameters) GetValueByName(name string) string {
 	parameter, ok := p.parameters[p.basePath+name]
 	if !ok {
@@ -67,7 +69,7 @@ func (p *Parameters) GetValueByName(name string) string {
 	return parameter.GetValue()
 }
 
-// GetValueByFullPath returns the value based on the full path
+// GetValueByFullPath returns the value based on the full path.
 func (p *Parameters) GetValueByFullPath(name string) string {
 	parameter, ok := p.parameters[name]
 	if !ok {
@@ -78,9 +80,13 @@ func (p *Parameters) GetValueByFullPath(name string) string {
 
 // Decode decodes the parameters into the given struct
 // We are using this package to decode the values to the struct https://github.com/mitchellh/mapstructure
-// For more details how you can use this check the parameter_test.go file
-func (p *Parameters) Decode(output interface{}) error {
-	return mapstructure.Decode(p.getKeyValueMap(), output)
+// For more details how you can use this check the parameter_test.go file.
+func (p *Parameters) Decode(output any) error {
+	if err := mapstructure.Decode(p.getKeyValueMap(), output); err != nil {
+		return fmt.Errorf("decoding parameters: %w", err)
+	}
+
+	return nil
 }
 
 func (p *Parameters) getKeyValueMap() map[string]string {
