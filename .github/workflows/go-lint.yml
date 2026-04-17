@@ -68,7 +68,7 @@ jobs:
             echo "pkgs=./..." >> "$GITHUB_OUTPUT"
             echo "new_from_rev=" >> "$GITHUB_OUTPUT"
           else
-            pkgs=$(git diff --name-only "$base_sha"..HEAD -- '*.go' \
+            pkgs=$(git diff --name-only --diff-filter=d "$base_sha"..HEAD -- '*.go' \
               | xargs -I{} dirname {} \
               | sort -u \
               | sed 's|^|./|' \
