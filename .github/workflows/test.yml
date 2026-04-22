@@ -185,8 +185,14 @@ jobs:
           overwrite-comment: true
           comment-tag: '${{ github.workflow }}-${{ github.event.pull_request.number }}'
 
-      - name: Remove mocks from coverage
-        run: grep -v -e ".\.pb\.go" -e "/mocks" cover.out > cover.filtered.out
+      - name: Resolve generated paths
+        id: generated_paths
+        uses: ./.github/actions/resolve-generated-paths
+
+      - name: Remove generated files from coverage
+        env:
+          EXCLUDE_REGEX: ${{ steps.generated_paths.outputs.grep-regex }}
+        run: grep -vE "${EXCLUDE_REGEX}" cover.out > cover.filtered.out
 
       - name: Get total coverage
         run: |
@@ -353,8 +359,14 @@ jobs:
           overwrite-comment: true
           comment-tag: '${{ github.workflow }}-${{ github.event.pull_request.number }}'
 
-      - name: Remove mocks from coverage
-        run: grep -v -e ".\.pb\.go" -e "/mocks" cover.out > cover.filtered.out
+      - name: Resolve generated paths
+        id: generated_paths
+        uses: ./.github/actions/resolve-generated-paths
+
+      - name: Remove generated files from coverage
+        env:
+          EXCLUDE_REGEX: ${{ steps.generated_paths.outputs.grep-regex }}
+        run: grep -vE "${EXCLUDE_REGEX}" cover.out > cover.filtered.out
 
       - name: Get total coverage
         run: |
