@@ -1,0 +1,216 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+#
+# Weekly run of every Fuzz* target in the module. One PR per target that
+# crashes; subsequent weekly runs push a new signed commit to the same branch
+# so an existing open PR is updated in place rather than duplicated.
+#
+# Adding a new `func FuzzX(f *testing.F)` anywhere in the module is picked up
+# automatically — the discover job enumerates targets at runtime and fans them
+# out via matrix.
+#
+# Verified commits: peter-evans with sign-commits: true commits via the
+# GraphQL createCommitOnBranch mutation, which makes GitHub sign the commit
+# server-side. We authenticate as the PaddleHQ file-sync GitHub App so
+# commits are attributed to that app (rather than github-actions[bot]) and
+# — crucially — the PRs this workflow opens trigger CI, which PRs opened by
+# the default GITHUB_TOKEN do not.
+
+name: Weekly fuzz
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Mondays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: 'Per-target fuzz duration (e.g. 5m, 30m, 1h)'
+        default: '5m'
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    name: Discover fuzz targets
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+      has_targets: ${{ steps.list.outputs.has_targets }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+
+      - name: List fuzz targets
+        id: list
+        # Note: GitHub's default shell is `bash -eo pipefail`, so we must
+        # use awk (always exits 0) instead of grep (exits 1 on no match)
+        # when filtering — packages with zero fuzz targets would otherwise
+        # abort the whole step.
+        run: |
+          set -uo pipefail
+          targets=$(
+            go list ./... | while read -r pkg; do
+              (go test -list='^Fuzz' "$pkg" 2>/dev/null || true) \
+                | awk '/^Fuzz/ {print $1}' \
+                | while read -r name; do
+                    jq -cn --arg pkg "$pkg" --arg name "$name" '{pkg: $pkg, name: $name}'
+                  done
+            done
+          )
+
+          if [[ -z "$targets" ]]; then
+            echo "No Fuzz* targets found."
+            echo "has_targets=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          matrix=$(printf '%s\n' "$targets" | jq -cs '{include: .}')
+          echo "has_targets=true" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Discovered:"
+          echo "$matrix" | jq .
+
+  fuzz:
+    name: Fuzz ${{ matrix.name }}
+    needs: discover
+    if: needs.discover.outputs.has_targets == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Create GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        with:
+          app-id: 923765
+          private-key: ${{ secrets.REPO_FILE_SYNC_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # peter-evans/create-pull-request handles its own git auth; leaving
+          # persist-credentials on causes a "Duplicate header: Authorization"
+          # error when peter-evans tries to use the remote.
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+
+      # Restore the fuzz cache from the previous week's run so the fuzzer
+      # builds on already-explored paths rather than cold-starting from the
+      # seed corpus alone. The key includes run_id so a new entry is always
+      # written post-job; restore-keys picks up the most recent entry for
+      # this target when no exact match exists.
+      - name: Restore fuzz cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/go-build/fuzz
+          key: fuzz-${{ matrix.name }}-${{ github.run_id }}
+          restore-keys: |
+            fuzz-${{ matrix.name }}-
+
+      # go test -fuzz returns non-zero when it finds a crash. That is the
+      # fuzzer doing its job, not a failure of this workflow — we capture
+      # the exit code here and only treat it as a failure below if no
+      # crash file was actually produced (which points at a genuine
+      # problem: build error, env misconfiguration, etc.).
+      - name: Run fuzzer
+        id: run
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '5m' }}
+        run: |
+          set -uo pipefail
+          echo "Fuzzing ${{ matrix.name }} in ${{ matrix.pkg }} for $FUZZTIME"
+          if go test -run='^$' -fuzz="^${{ matrix.name }}$" -fuzztime="$FUZZTIME" "${{ matrix.pkg }}"; then
+            echo "exit_code=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect new crash inputs
+        id: detect
+        run: |
+          set -euo pipefail
+          new_files=$(git ls-files --others --exclude-standard -- "testdata/fuzz/${{ matrix.name }}/" || true)
+          if [[ -n "$new_files" ]]; then
+            echo "has_crashes=true" >> "$GITHUB_OUTPUT"
+            echo "New crash inputs for ${{ matrix.name }}:"
+            printf '%s\n' "$new_files"
+          else
+            echo "has_crashes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update PR with verified commit
+        if: steps.detect.outputs.has_crashes == 'true'
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          sign-commits: true
+          branch: fuzz/${{ matrix.name }}
+          base: main
+          add-paths: testdata/fuzz/${{ matrix.name }}/**
+          commit-message: "Add crash corpus for ${{ matrix.name }} from weekly fuzz run"
+          title: "Fuzz crash: ${{ matrix.name }}"
+          draft: true
+          labels: norelease
+          body: |
+            The weekly fuzz workflow found inputs that crash `${{ matrix.name }}`. Each failing input is saved as `testdata/fuzz/${{ matrix.name }}/<hash>` and re-runs as a deterministic regression test on every `go test ./...` from now on.
+
+            ### What to do
+            1. `git checkout fuzz/${{ matrix.name }}` and run `go test ./...` to reproduce locally.
+            2. Fix the underlying bug in the code under test.
+            3. Keep the corpus files so the regression stays guarded after the fix.
+
+            ### About this PR
+            - Auto-updates: subsequent weekly runs force-push the current set of crashing inputs to `fuzz/${{ matrix.name }}`, so an existing open PR is updated in place.
+            - Latest run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            - Per-target budget: `${{ inputs.fuzztime || '5m' }}`
+
+      # Only fail the job if the fuzzer exited non-zero AND didn't produce
+      # a crash file. That combination means it couldn't actually run —
+      # build error, env misconfig, etc. — rather than successfully
+      # discovering a bug.
+      - name: Fail if fuzzer errored without finding crashes
+        if: steps.run.outputs.exit_code != '0' && steps.detect.outputs.has_crashes != 'true'
+        run: |
+          echo "Fuzzer exited with code ${{ steps.run.outputs.exit_code }} but produced no crash inputs."
+          echo "This indicates a genuine failure (build error, environment issue, misconfiguration)."
+          exit 1
