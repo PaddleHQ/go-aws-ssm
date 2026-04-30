@@ -214,3 +214,25 @@ jobs:
           echo "Fuzzer exited with code ${{ steps.run.outputs.exit_code }} but produced no crash inputs."
           echo "This indicates a genuine failure (build error, environment issue, misconfiguration)."
           exit 1
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    if: always()
+    needs: [discover, fuzz]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Export workflow trace
+        uses: corentinmusard/otel-cicd-action@f2d88ecf54d9dd3e01ea95e25f93603212ee93d3 # v4.0.1
+        continue-on-error: true
+        with:
+          otlpEndpoint: grpc://api.honeycomb.io:443/
+          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
