@@ -1,0 +1,40 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: OTel export to Honeycomb
+description: |
+  Ships GitHub Actions run telemetry to Honeycomb via corentinmusard/otel-cicd-action,
+  tagged with a hash of the workflow source file so changes to the synced workflow can
+  be correlated with run-time regressions.
+
+inputs:
+  honeycomb-team:
+    description: Honeycomb API key. Pass `${{ secrets.HONEYCOMB_GHA_SECRET }}` — secrets cannot be read directly inside composite actions.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout workflow file
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        sparse-checkout: .github/workflows
+        sparse-checkout-cone-mode: false
+        persist-credentials: false
+
+    - name: Compute workflow source hash
+      id: wfhash
+      shell: bash
+      run: |
+        path="${GITHUB_WORKFLOW_REF#*/*/}"   # strip owner/repo/
+        path="${path%@*}"                    # strip @ref
+        hash=$(sha256sum "$path" | cut -c1-12)
+        echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+    - name: Export workflow trace
+      uses: corentinmusard/otel-cicd-action@f2d88ecf54d9dd3e01ea95e25f93603212ee93d3 # v4.0.1
+      continue-on-error: true
+      with:
+        otlpEndpoint: grpc://api.honeycomb.io:443/
+        otlpHeaders: "x-honeycomb-team=${{ inputs.honeycomb-team }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
+        githubToken: ${{ github.token }}
+        customAttributes: '{"workflow.source.hash":"${{ steps.wfhash.outputs.hash }}"}'
