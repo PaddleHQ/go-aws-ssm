@@ -64,7 +64,70 @@ jobs:
           go install github.com/abhijit-hota/modfmt@v0.0.0-20260105113844-287023c3d905
           go install github.com/PaddleHQ/ghokin/v4@1a4a51e4fc32c59c88d7eb7e4835636641a54b0f # v4.1.1
 
+      #  --
+      # Resolve scope
+      #
+      # Regular PRs and merge_group: scope to the diff against the base ref.
+      # Template-sync PRs (origin:go-library-template, origin:example-service)
+      # skip this step and fall through to full scope via `|| '.'` defaults
+      # below — tool version bumps may surface issues in untouched files.
+
+      - name: Resolve validate scope
+        id: scope
+        if: |-
+          !contains(github.event.pull_request.labels.*.name, 'origin:go-library-template') &&
+          !contains(github.event.pull_request.labels.*.name, 'origin:example-service')
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.merge_group.base_ref }}
+        run: |
+          base_ref="${BASE_REF#refs/heads/}"
+          base_sha=$(git merge-base "origin/${base_ref}" HEAD)
+
+          changed_go_files=$(git diff --name-only --diff-filter=d "$base_sha"..HEAD -- '*.go')
+          changed_features=$(git diff --name-only --diff-filter=d "$base_sha"..HEAD -- '*.feature')
+
+          # Detect changes that may affect generated ERDs (schema2mermaid).
+          # Heuristic: any *.sql migration, or any file under a `schema/`
+          # directory. False positives (e.g. an unrelated `schema/` dir for
+          # JSON schemas) just mean we re-run DB setup unnecessarily; the
+          # Go Generate step uses a more precise import-based filter to
+          # decide which packages actually need a DB.
+          schema_changed=false
+          if git diff --name-only --diff-filter=d "$base_sha"..HEAD | grep -qE '\.sql$|(^|/)schema/'; then
+            schema_changed=true
+          fi
+
+          # govulncheck's input is (go.sum, vuln-db, reachability); if
+          # go.sum hasn't moved vs base, main's last run already covered it.
+          gosum_changed=false
+          if git diff --name-only --diff-filter=d "$base_sha"..HEAD | grep -qE '(^|/)go\.sum$'; then
+            gosum_changed=true
+          fi
+
+          go_files=$(printf '%s' "$changed_go_files" | tr '\n' ' ')
+          feature_files=$(printf '%s' "$changed_features" | tr '\n' ' ')
+
+          go_pkgs=$(printf '%s' "$changed_go_files" | awk -F/ '
+            NF == 0 { next }
+            NF == 1 { print "./"; next }
+            { OFS="/"; NF--; print "./" $0 }
+          ' | sort -u | tr '\n' ' ')
+
+          {
+            echo "go_files=${go_files}"
+            echo "go_pkgs=${go_pkgs}"
+            echo "feature_files=${feature_files}"
+            echo "schema_changed=${schema_changed}"
+            echo "gosum_changed=${gosum_changed}"
+          } >> "$GITHUB_OUTPUT"
+
+      #  --
+      # Setup test databases — only when the diff might affect ERD output.
+      # Template-sync PRs (scope skipped) get setup as a safety net so
+      # tool-version bumps re-run schema2mermaid against a fresh DB.
+
       - name: Setup test databases
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.schema_changed == 'true'
         uses: ./.github/actions/setup-databases
 
       #  --
@@ -103,21 +166,48 @@ jobs:
             )
 
       - name: Go Format
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.go_files != ''
         run: |
-          gofmt -s -w .
+          gofmt -s -w ${{ steps.scope.outputs.go_files || '.' }}
           git diff --exit-code ||
             (echo '::error title=Incorrect Go Format::Please run "gofmt -s -w ."' && exit 1)
 
+      # Two mutually-exclusive variants, gated by YAML `if:`. Exactly one
+      # runs: the full variant on template-sync PRs (scope skipped) or
+      # schema-affecting changes; the filtered variant otherwise.
+
       - name: Go Generate
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.schema_changed == 'true'
         run: |
           go generate ./...
           git diff --exit-code || \
             (echo '::error title=Incorrect Generated Files::Please run "go generate ./..."' && exit 1)
 
+      - name: Go Generate (skip schema-mermaid pkgs)
+        if: steps.scope.outputs.schema_changed == 'false'
+        run: |
+          # `pipefail` so a failing `go list` surfaces as a step failure
+          # rather than silently producing empty $pkgs and confusing
+          # `go generate` with no args.
+          set -o pipefail
+          # Skip generators that need a live DB (importers of `schema2mermaid`
+          # — only ERD generators across PaddleHQ services). Other generators
+          # (mockery etc.) still run. Filter targets schema2mermaid *imports*
+          # rather than a path glob like `schema/` so packages such as
+          # `internal/handler/schema` (JSON schema, no DB) keep running.
+          pkgs=$(go list -f '{{.ImportPath}} {{join .Imports " "}}' ./... \
+            | grep -v 'schema2mermaid' \
+            | awk '{print $1}')
+          # shellcheck disable=SC2086 # intentional word-splitting on space-separated pkg list
+          go generate $pkgs
+          git diff --exit-code || \
+            (echo '::error title=Incorrect Generated Files::Please run "go generate ./..."' && exit 1)
+
       - name: Check feature file formatting
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.feature_files != ''
         run: |
           [ -d "features/" ] || exit 0
-          ghokin check features/ || \
+          ghokin check ${{ steps.scope.outputs.feature_files || 'features/' }} || \
             (echo '::error title=Incorrect feature file formatting::Please run "go run github.com/PaddleHQ/ghokin/v4@1a4a51e4fc32c59c88d7eb7e4835636641a54b0f fmt replace features/" to fix' && exit 1)
 
       # --
@@ -125,6 +215,7 @@ jobs:
 
       - name: Run `govulncheck`
         id: govulncheck
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.gosum_changed == 'true'
         shell: bash {0} # disable fast fail / set -e
         run: |
           result=$(govulncheck ./...)
@@ -137,8 +228,12 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
+      # Same gating as govulncheck above so an existing vuln comment isn't
+      # deleted by a subsequent non-gosum-touching push.
       - name: Comment PR with vulnerabilities
-        if: github.event_name == 'pull_request'
+        if: |
+          github.event_name == 'pull_request' &&
+          (steps.scope.conclusion == 'skipped' || steps.scope.outputs.gosum_changed == 'true')
         uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
         with:
           comment-tag: govulncheck
@@ -154,11 +249,13 @@ jobs:
       # Gopls
 
       - name: Run `modernize (part of gopls)`
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.go_pkgs != ''
         run: |
-          modernize -test ./... 2>&1 | awk -F ":" '{print "::notice file="$1",line="$2",title=gopls: "$4"::Use `go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest -test -fix ./...` to automatically fix"}'
+          modernize -test ${{ steps.scope.outputs.go_pkgs || './...' }} 2>&1 | awk -F ":" '{print "::notice file="$1",line="$2",title=gopls: "$4"::Use `go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest -test -fix ./...` to automatically fix"}'
 
       - name: Vet
-        run: go vet ./...
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.go_pkgs != ''
+        run: go vet ${{ steps.scope.outputs.go_pkgs || './...' }}
 
       # --
       # Breaking changes
