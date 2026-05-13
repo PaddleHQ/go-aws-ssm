@@ -200,14 +200,28 @@ jobs:
         run: |
           echo "🔍 Checking dependency changes in go.mod..."
           if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- 'go.mod'; then
-            echo "ℹ️ No changes in go.mod - automerge not enabled. Requires manual review"
-            echo "can_automerge=false" >> "$GITHUB_OUTPUT"
+            REASON="No changes detected in \`go.mod\` — automerge only applies to PaddleHQ dependency updates."
+            echo "ℹ️ ${REASON}"
+            {
+              echo "can_automerge=false"
+              echo "reason=${REASON}"
+            } >> "$GITHUB_OUTPUT"
           elif git diff --quiet -G "github.com/PaddleHQ/" ${{ needs.pr_info.outputs.merge_base }} -- go.mod; then
-            echo "⚠️ No PaddleHQ dependencies updated - automerge not enabled. Requires manual review"
+            REASON="No PaddleHQ dependencies updated — third-party dependency updates require manual review."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           else
             echo "✅ PaddleHQ dependencies updated - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Validate Dependabot Changes"
+          reason: ${{ steps.check-external.outputs.reason }}
+          github_token: ${{ github.token }}
 
     outputs:
       can_automerge: ${{ steps.check-external.outputs.can_automerge }}
@@ -250,8 +264,18 @@ jobs:
             echo "✅ Only safe template files modified (workflows/dependabot) - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           else
-            echo "⚠️ Updates to non-standard files - automerge not enabled. Requires manual review"
+            REASON="Updates to files outside the safe template allow-list (\`.github/actions\`, \`.github/workflows\`, \`.github/dependabot.yml\`, \`.github/pull_request_template.md\`, \`.github/release.yml\`) — manual review required."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Check GO Library Template changes"
+          reason: ${{ steps.check-files.outputs.reason }}
+          github_token: ${{ github.token }}
 
     outputs:
       can_automerge: ${{ steps.check-files.outputs.can_automerge }}
@@ -296,11 +320,22 @@ jobs:
             | awk '{files+=$1; inserted+=$4; deleted+=$6} END {print deleted}')
 
           if [ "$LINES_DELETED" -gt 0 ]; then
-            echo "⚠️ Files deleted - automerge not enabled. Needs manual review"
+            REASON="Diff contains ${LINES_DELETED} deleted line(s) — paddle-config sync PRs are only auto-merged when changes are additions/modifications only."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           else
-            echo "✅ No files deleted (only additions/modifications) - automerge enabled"
+            echo "✅ No lines deleted (only additions/modifications) - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        if: steps.build_config.outputs['automergePaddleConfig'] == 'true'
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Check Paddle Config Changes"
+          reason: ${{ steps.check-additions.outputs.reason }}
+          github_token: ${{ github.token }}
 
     outputs:
       can_automerge: ${{ steps.check-additions.outputs.can_automerge }}
@@ -348,8 +383,18 @@ jobs:
             echo "✅ Only safe template files modified - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           else
-            echo "⚠️ Updates to non-standard files - automerge not enabled. Requires manual review"
+            REASON="Renovate sync modified files outside the safe \`*.yaml.tmpl\` allow-list — manual review required."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Check Renovate Changes"
+          reason: ${{ steps.check-files.outputs.reason }}
+          github_token: ${{ github.token }}
 
     outputs:
       can_automerge: ${{ steps.check-files.outputs.can_automerge }}
@@ -443,7 +488,7 @@ jobs:
           egress-policy: audit
 
       - name: Export workflow trace
-        uses: corentinmusard/otel-cicd-action@f2d88ecf54d9dd3e01ea95e25f93603212ee93d3 # v4.0.1
+        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true
         with:
           otlpEndpoint: grpc://api.honeycomb.io:443/

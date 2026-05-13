@@ -59,6 +59,10 @@ jobs:
 
       - name: Install `govulncheck`, `gopls`, `modfmt` and `ghokin`
         run: |
+          for cmd in govulncheck modernize modfmt ghokin; do
+            command -v "$cmd" >/dev/null || install_all=1
+          done
+          [ -z "${install_all:-}" ] && exit 0
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.20.0
           go install github.com/abhijit-hota/modfmt@v0.0.0-20260105113844-287023c3d905
@@ -207,7 +211,7 @@ jobs:
         if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.feature_files != ''
         run: |
           [ -d "features/" ] || exit 0
-          ghokin check ${{ steps.scope.outputs.feature_files || 'features/' }} || \
+          ghokin check features/ || \
             (echo '::error title=Incorrect feature file formatting::Please run "go run github.com/PaddleHQ/ghokin/v4@1a4a51e4fc32c59c88d7eb7e4835636641a54b0f fmt replace features/" to fix' && exit 1)
 
       # --
@@ -318,7 +322,7 @@ jobs:
           egress-policy: audit
 
       - name: Export workflow trace
-        uses: corentinmusard/otel-cicd-action@f2d88ecf54d9dd3e01ea95e25f93603212ee93d3 # v4.0.1
+        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true
         with:
           otlpEndpoint: grpc://api.honeycomb.io:443/
