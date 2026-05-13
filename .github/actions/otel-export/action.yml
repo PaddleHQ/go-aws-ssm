@@ -2,7 +2,7 @@
 
 name: OTel export to Honeycomb
 description: |
-  Ships GitHub Actions run telemetry to Honeycomb via corentinmusard/otel-cicd-action,
+  Ships GitHub Actions run telemetry to Honeycomb via step-security/otel-cicd-action,
   tagged with a hash of the workflow source file so changes to the synced workflow can
   be correlated with run-time regressions.
 
@@ -31,7 +31,7 @@ runs:
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
     - name: Export workflow trace
-      uses: corentinmusard/otel-cicd-action@f2d88ecf54d9dd3e01ea95e25f93603212ee93d3 # v4.0.1
+      uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
       continue-on-error: true
       with:
         otlpEndpoint: grpc://api.honeycomb.io:443/
