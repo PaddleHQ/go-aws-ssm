@@ -30,6 +30,11 @@ runs:
         hash=$(sha256sum "$path" | cut -c1-12)
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
+    - name: Capture runner image version
+      id: image
+      shell: bash
+      run: echo "version=${RUNNER_IMAGE_VERSION:-unknown}" >> "$GITHUB_OUTPUT"
+
     - name: Export workflow trace
       uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
       continue-on-error: true
@@ -37,4 +42,4 @@ runs:
         otlpEndpoint: grpc://api.honeycomb.io:443/
         otlpHeaders: "x-honeycomb-team=${{ inputs.honeycomb-team }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
         githubToken: ${{ github.token }}
-        customAttributes: '{"workflow.source.hash":"${{ steps.wfhash.outputs.hash }}"}'
+        customAttributes: '{"workflow.source.hash":"${{ steps.wfhash.outputs.hash }}","runner.image.version":"${{ steps.image.outputs.version }}"}'

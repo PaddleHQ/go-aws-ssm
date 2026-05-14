@@ -21,7 +21,7 @@ runs:
           fromJSON(inputs.event).pull_request.merged == false &&
           fromJSON(inputs.event).pull_request.draft == false &&
           fromJSON(inputs.event).pull_request.state == 'open'
-      uses: benc-uk/workflow-dispatch@e2e5e9a103e331dad343f381a29e654aea3cf8fc # v1.2.4
+      uses: step-security/workflow-dispatch@821295dcc146c6330b5a388c03d56f9c90e667fc # v1.3.1
       with:
         workflow: automerge.yml
         ref: ${{ github.head_ref || github.ref_name }}
@@ -33,7 +33,7 @@ runs:
     - name: Attempt to auto ready for review
       if: fromJSON(inputs.event).pull_request != null &&
           fromJSON(inputs.event).pull_request.draft == true
-      uses: benc-uk/workflow-dispatch@e2e5e9a103e331dad343f381a29e654aea3cf8fc # v1.2.4
+      uses: step-security/workflow-dispatch@821295dcc146c6330b5a388c03d56f9c90e667fc # v1.3.1
       with:
         workflow: auto-ready-for-review.yml
         ref: ${{ github.head_ref || github.ref_name }}
