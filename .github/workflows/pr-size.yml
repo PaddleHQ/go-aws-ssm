@@ -89,7 +89,7 @@ jobs:
           gh pr edit ${{ github.event.pull_request.number }} --add-label "size/${SIZE}"
 
       - name: Comment PR to warn about PR size
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: very_large_pr
           mode: ${{ steps.lines_changed.outputs.total >= 1000 && 'upsert' || 'delete' }}

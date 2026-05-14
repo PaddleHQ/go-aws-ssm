@@ -33,7 +33,7 @@ jobs:
           persist-credentials: true # Required so that reviewdog can fallback to git command
 
       - name: Lint github actions
-        uses: reviewdog/action-actionlint@6fb7acc99f4a1008869fa8a0f09cfca740837d9d # v1.72.0
+        uses: step-security/action-actionlint@c3aa382d371c6b05513ae5907d4f77713e21813c # v1.72.0
         with:
           reporter: github-pr-review
           filter_mode: nofilter

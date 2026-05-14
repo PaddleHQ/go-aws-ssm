@@ -47,7 +47,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # v1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -78,7 +78,7 @@ jobs:
           fi
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
+        uses: step-security/golangci-lint-action@1797facf9ea427614d729a4e9cab0fae1a7852d9 # v9.2.0
         with:
           version: v2.5.0
           args: --timeout=${{ steps.build_config.outputs['lintTimeout'] || '5m' }} ${{ steps.scope.outputs.new_from_rev }} ${{ steps.scope.outputs.pkgs }}

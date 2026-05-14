@@ -238,7 +238,7 @@ jobs:
         if: |
           github.event_name == 'pull_request' &&
           (steps.scope.conclusion == 'skipped' || steps.scope.outputs.gosum_changed == 'true')
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: govulncheck
           mode: ${{ steps.govulncheck.outputs.result != '' && 'upsert' || 'delete' }}
@@ -321,6 +321,16 @@ jobs:
         with:
           egress-policy: audit
 
+      - name: Fetch workflow run timestamps
+        id: run_times
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          json=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          echo "created_at=$(echo "$json" | jq -r '.created_at')" >> "$GITHUB_OUTPUT"
+          echo "run_started_at=$(echo "$json" | jq -r '.run_started_at')" >> "$GITHUB_OUTPUT"
+
       - name: Export workflow trace
         uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true
@@ -328,3 +338,4 @@ jobs:
           otlpEndpoint: grpc://api.honeycomb.io:443/
           otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
           githubToken: ${{ secrets.GITHUB_TOKEN }}
+          extraAttributes: "github.workflow_run.created_at=${{ steps.run_times.outputs.created_at }},github.workflow_run.run_started_at=${{ steps.run_times.outputs.run_started_at }}"

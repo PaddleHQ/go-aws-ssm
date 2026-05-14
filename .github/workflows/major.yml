@@ -61,7 +61,7 @@ jobs:
         run: git credential-cache exit
 
       - name: Comment PR to update major dependencies
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: major_dependencies
           mode: ${{ steps.gomajor.outputs.major_dependencies != '' && 'upsert' || 'delete' }}

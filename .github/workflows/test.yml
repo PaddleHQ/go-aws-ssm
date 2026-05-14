@@ -32,6 +32,7 @@ jobs:
     outputs:
       testRunner: ${{ steps.build_config.outputs.testRunner }}
       separateRaceTests: ${{ steps.build_config.outputs['separateRaceTests'] }}
+      runsOn: ${{ steps.build_config.outputs.runsOn }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
@@ -46,7 +47,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -85,7 +86,7 @@ jobs:
     needs:
       - read-config
       - ecr-login
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
     container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
     steps:
       - name: Mask ECR token in logs
@@ -201,7 +202,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -215,7 +216,7 @@ jobs:
 
       - name: Ensure coverage is good
         if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
@@ -232,7 +233,7 @@ jobs:
 
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
@@ -257,7 +258,7 @@ jobs:
     needs:
       - read-config
       - ecr-login
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
     container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
     steps:
       - name: Mask ECR token in logs
@@ -375,7 +376,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -389,7 +390,7 @@ jobs:
 
       - name: Ensure coverage is good
         if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
@@ -406,7 +407,7 @@ jobs:
 
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
@@ -430,7 +431,7 @@ jobs:
     if: needs.read-config.outputs.separateRaceTests == 'true'
     needs:
       - read-config
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
@@ -545,10 +546,21 @@ jobs:
         with:
           egress-policy: audit
 
+      - name: Fetch workflow run timestamps
+        id: run_times
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          json=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          echo "created_at=$(echo "$json" | jq -r '.created_at')" >> "$GITHUB_OUTPUT"
+          echo "run_started_at=$(echo "$json" | jq -r '.run_started_at')" >> "$GITHUB_OUTPUT"
+
       - name: Export workflow trace
         uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true
         with:
           otlpEndpoint: grpc://api.honeycomb.io:443/
           otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
+          extraAttributes: "github.workflow_run.created_at=${{ steps.run_times.outputs.created_at }},github.workflow_run.run_started_at=${{ steps.run_times.outputs.run_started_at }}"
           githubToken: ${{ secrets.GITHUB_TOKEN }}
