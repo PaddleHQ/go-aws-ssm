@@ -1,0 +1,8 @@
+self-hosted-runner:
+  labels:
+    - go-4-core
+    - go-4-core-latest
+    - go-8-core
+    - go-8-core-latest
+    - go-16-core
+    - go-16-core-latest
