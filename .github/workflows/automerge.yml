@@ -260,11 +260,11 @@ jobs:
         run: |
           echo "🔍 Checking which files were modified by from a library template sync..."
           # Check if only safe files were modified (workflows and dependabot config)
-          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- ':!.github/actions' ':!.github/workflows' ':!.github/dependabot.yml' ':!.github/pull_request_template.md' ':!.github/release.yml'; then
+          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- ':!.github/actions' ':!.github/workflows' ':!.github/dependabot.yml' ':!.github/pull_request_template.md' ':!.github/release.yml' ':!.github/actionlint.yaml'; then
             echo "✅ Only safe template files modified (workflows/dependabot) - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           else
-            REASON="Updates to files outside the safe template allow-list (\`.github/actions\`, \`.github/workflows\`, \`.github/dependabot.yml\`, \`.github/pull_request_template.md\`, \`.github/release.yml\`) — manual review required."
+            REASON="Updates to files outside the safe template allow-list (\`.github/actions\`, \`.github/workflows\`, \`.github/dependabot.yml\`, \`.github/pull_request_template.md\`, \`.github/release.yml\`, \`.github/actionlint.yaml\`) — manual review required."
             echo "⚠️ ${REASON}"
             echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           fi
