@@ -1,0 +1,57 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Resolve generated paths
+description: |
+  Merge the baseline generated-paths patterns (shipped with this action) with
+  repo-specific additions from build-config.yaml `generatedPaths`. Emits the raw
+  pattern list and a `grep -vE` regex form.
+
+outputs:
+  patterns:
+    description: Newline-separated gitignore-style patterns (baseline + repo extras, unique).
+    value: ${{ steps.resolve.outputs.patterns }}
+  grep-regex:
+    description: Alternation regex for `grep -vE` against file paths, e.g. `([^/]*\.pb\.go|mocks/)`.
+    value: ${{ steps.resolve.outputs.grep-regex }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve patterns
+      id: resolve
+      shell: bash
+      env:
+        BASELINE: ${{ github.action_path }}/generated-paths
+      run: |
+        set -euo pipefail
+
+        if [ ! -f "${BASELINE}" ]; then
+          echo "::error::Baseline file ${BASELINE} not found."
+          exit 1
+        fi
+
+        baseline_patterns=$(grep -Ev '^[[:space:]]*(#|$)' "${BASELINE}" || true)
+
+        extras=""
+        if [ -f build-config.yaml ]; then
+          extras=$(yq '.generatedPaths // [] | .[]' build-config.yaml 2>/dev/null || true)
+        fi
+
+        patterns=$(printf '%s\n%s\n' "${baseline_patterns}" "${extras}" | awk 'NF' | awk '!seen[$0]++')
+
+        {
+          echo 'patterns<<PATTERNS_EOF'
+          printf '%s\n' "${patterns}"
+          echo 'PATTERNS_EOF'
+        } >> "$GITHUB_OUTPUT"
+
+        grep_regex=$(printf '%s\n' "${patterns}" | awk '
+          NF {
+            sub(/^\*\*\//, "", $0)
+            sub(/\/\*\*$/, "/", $0)
+            gsub(/\./, "\\.", $0)
+            gsub(/\*/, "[^/]*", $0)
+            print
+          }
+        ' | paste -sd'|' -)
+        echo "grep-regex=(${grep_regex})" >> "$GITHUB_OUTPUT"

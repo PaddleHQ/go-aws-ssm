@@ -32,9 +32,10 @@ jobs:
     outputs:
       testRunner: ${{ steps.build_config.outputs.testRunner }}
       separateRaceTests: ${{ steps.build_config.outputs['separateRaceTests'] }}
+      runsOn: ${{ steps.build_config.outputs.runsOn }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -46,7 +47,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -58,13 +59,13 @@ jobs:
       token: ${{ steps.ecr-token.outputs.token }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
       - name: Configure AWS credentials
         if: needs.read-config.outputs.testRunner != ''
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
           audience: sts.amazonaws.com
           role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
@@ -85,7 +86,7 @@ jobs:
     needs:
       - read-config
       - ecr-login
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
     container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
     steps:
       - name: Mask ECR token in logs
@@ -93,7 +94,7 @@ jobs:
         run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
 
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -126,7 +127,7 @@ jobs:
             done
 
       - name: Cache test results
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cache/go-build
@@ -176,7 +177,7 @@ jobs:
 
       - name: Publish Test Report
         if: always() && github.event_name == 'pull_request'
-        uses: ctrf-io/github-test-reporter@31e2a2735dd4641c65c2f49eb07e93ce8ec37fff # v1.0.27
+        uses: ctrf-io/github-test-reporter@0f299074936c32ccaab5be5230511f6b2b9080aa # v1.0.28
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -185,8 +186,14 @@ jobs:
           overwrite-comment: true
           comment-tag: '${{ github.workflow }}-${{ github.event.pull_request.number }}'
 
-      - name: Remove mocks from coverage
-        run: grep -v -e ".\.pb\.go" -e "/mocks" cover.out > cover.filtered.out
+      - name: Resolve generated paths
+        id: generated_paths
+        uses: ./.github/actions/resolve-generated-paths
+
+      - name: Remove generated files from coverage
+        env:
+          EXCLUDE_REGEX: ${{ steps.generated_paths.outputs.grep-regex }}
+        run: grep -vE "${EXCLUDE_REGEX}" cover.out > cover.filtered.out
 
       - name: Get total coverage
         run: |
@@ -195,7 +202,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -209,7 +216,7 @@ jobs:
 
       - name: Ensure coverage is good
         if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
@@ -226,7 +233,7 @@ jobs:
 
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
@@ -251,7 +258,7 @@ jobs:
     needs:
       - read-config
       - ecr-login
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
     container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
     steps:
       - name: Mask ECR token in logs
@@ -259,7 +266,7 @@ jobs:
         run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
 
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -292,7 +299,7 @@ jobs:
             done
 
       - name: Cache test results
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cache/go-build
@@ -344,7 +351,7 @@ jobs:
 
       - name: Publish Test Report
         if: always()
-        uses: ctrf-io/github-test-reporter@31e2a2735dd4641c65c2f49eb07e93ce8ec37fff # v1.0.27
+        uses: ctrf-io/github-test-reporter@0f299074936c32ccaab5be5230511f6b2b9080aa # v1.0.28
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -353,8 +360,14 @@ jobs:
           overwrite-comment: true
           comment-tag: '${{ github.workflow }}-${{ github.event.pull_request.number }}'
 
-      - name: Remove mocks from coverage
-        run: grep -v -e ".\.pb\.go" -e "/mocks" cover.out > cover.filtered.out
+      - name: Resolve generated paths
+        id: generated_paths
+        uses: ./.github/actions/resolve-generated-paths
+
+      - name: Remove generated files from coverage
+        env:
+          EXCLUDE_REGEX: ${{ steps.generated_paths.outputs.grep-regex }}
+        run: grep -vE "${EXCLUDE_REGEX}" cover.out > cover.filtered.out
 
       - name: Get total coverage
         run: |
@@ -363,7 +376,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -377,7 +390,7 @@ jobs:
 
       - name: Ensure coverage is good
         if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
@@ -394,7 +407,7 @@ jobs:
 
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'
-        uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3
+        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
@@ -418,10 +431,10 @@ jobs:
     if: needs.read-config.outputs.separateRaceTests == 'true'
     needs:
       - read-config
-    runs-on: ubuntu-24.04
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -451,7 +464,7 @@ jobs:
             done
 
       - name: Cache test results
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cache/go-build
@@ -486,13 +499,24 @@ jobs:
   automerge_tests:
     name: Automerge unit tests with and without race detector
     needs:
+      - read-config
       - test-combined
       - test
       - race
+    # `test-combined` and (`test` + `race`) are mutually exclusive paths
+    # selected by `separateRaceTests`, so one branch is always skipped.
+    # Without this condition the default `success()` gate skips this job
+    # whenever any need is skipped — meaning the automerge trigger never
+    # fires.
+    if: |-
+      !cancelled() && (
+        needs.test-combined.result == 'success' ||
+        (needs.test.result == 'success' && needs.race.result == 'success')
+      )
     runs-on: ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -507,3 +531,36 @@ jobs:
         with:
           event: ${{ toJSON(github.event) }}
           hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    if: always()
+    needs: [read-config, ecr-login, test, test-combined, race, automerge_tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Fetch workflow run timestamps
+        id: run_times
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          json=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          echo "created_at=$(echo "$json" | jq -r '.created_at')" >> "$GITHUB_OUTPUT"
+          echo "run_started_at=$(echo "$json" | jq -r '.run_started_at')" >> "$GITHUB_OUTPUT"
+
+      - name: Export workflow trace
+        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        continue-on-error: true
+        with:
+          otlpEndpoint: grpc://api.honeycomb.io:443/
+          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
+          extraAttributes: "github.workflow_run.created_at=${{ steps.run_times.outputs.created_at }},github.workflow_run.run_started_at=${{ steps.run_times.outputs.run_started_at }}"
+          githubToken: ${{ secrets.GITHUB_TOKEN }}

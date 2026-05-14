@@ -41,7 +41,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -116,7 +116,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -184,7 +184,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -200,14 +200,28 @@ jobs:
         run: |
           echo "🔍 Checking dependency changes in go.mod..."
           if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- 'go.mod'; then
-            echo "ℹ️ No changes in go.mod - automerge not enabled. Requires manual review"
-            echo "can_automerge=false" >> "$GITHUB_OUTPUT"
+            REASON="No changes detected in \`go.mod\` — automerge only applies to PaddleHQ dependency updates."
+            echo "ℹ️ ${REASON}"
+            {
+              echo "can_automerge=false"
+              echo "reason=${REASON}"
+            } >> "$GITHUB_OUTPUT"
           elif git diff --quiet -G "github.com/PaddleHQ/" ${{ needs.pr_info.outputs.merge_base }} -- go.mod; then
-            echo "⚠️ No PaddleHQ dependencies updated - automerge not enabled. Requires manual review"
+            REASON="No PaddleHQ dependencies updated — third-party dependency updates require manual review."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           else
             echo "✅ PaddleHQ dependencies updated - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Validate Dependabot Changes"
+          reason: ${{ steps.check-external.outputs.reason }}
+          github_token: ${{ github.token }}
 
     outputs:
       can_automerge: ${{ steps.check-external.outputs.can_automerge }}
@@ -230,7 +244,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -246,12 +260,22 @@ jobs:
         run: |
           echo "🔍 Checking which files were modified by from a library template sync..."
           # Check if only safe files were modified (workflows and dependabot config)
-          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- ':!.github/actions' ':!.github/workflows' ':!.github/dependabot.yml' ':!.github/pull_request_template.md' ':!.github/release.yml'; then
+          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- ':!.github/actions' ':!.github/workflows' ':!.github/dependabot.yml' ':!.github/pull_request_template.md' ':!.github/release.yml' ':!.github/actionlint.yaml'; then
             echo "✅ Only safe template files modified (workflows/dependabot) - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           else
-            echo "⚠️ Updates to non-standard files - automerge not enabled. Requires manual review"
+            REASON="Updates to files outside the safe template allow-list (\`.github/actions\`, \`.github/workflows\`, \`.github/dependabot.yml\`, \`.github/pull_request_template.md\`, \`.github/release.yml\`, \`.github/actionlint.yaml\`) — manual review required."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Check GO Library Template changes"
+          reason: ${{ steps.check-files.outputs.reason }}
+          github_token: ${{ github.token }}
 
     outputs:
       can_automerge: ${{ steps.check-files.outputs.can_automerge }}
@@ -270,7 +294,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -283,7 +307,7 @@ jobs:
 
       - name: "📖 Read Build Configuration"
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -296,11 +320,22 @@ jobs:
             | awk '{files+=$1; inserted+=$4; deleted+=$6} END {print deleted}')
 
           if [ "$LINES_DELETED" -gt 0 ]; then
-            echo "⚠️ Files deleted - automerge not enabled. Needs manual review"
+            REASON="Diff contains ${LINES_DELETED} deleted line(s) — paddle-config sync PRs are only auto-merged when changes are additions/modifications only."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           else
-            echo "✅ No files deleted (only additions/modifications) - automerge enabled"
+            echo "✅ No lines deleted (only additions/modifications) - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        if: steps.build_config.outputs['automergePaddleConfig'] == 'true'
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Check Paddle Config Changes"
+          reason: ${{ steps.check-additions.outputs.reason }}
+          github_token: ${{ github.token }}
 
     outputs:
       can_automerge: ${{ steps.check-additions.outputs.can_automerge }}
@@ -322,7 +357,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -335,7 +370,7 @@ jobs:
 
       - name: "📖 Read Build Configuration"
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -348,8 +383,18 @@ jobs:
             echo "✅ Only safe template files modified - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           else
-            echo "⚠️ Updates to non-standard files - automerge not enabled. Requires manual review"
+            REASON="Renovate sync modified files outside the safe \`*.yaml.tmpl\` allow-list — manual review required."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Check Renovate Changes"
+          reason: ${{ steps.check-files.outputs.reason }}
+          github_token: ${{ github.token }}
 
     outputs:
       can_automerge: ${{ steps.check-files.outputs.can_automerge }}
@@ -381,7 +426,7 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
         with:
           egress-policy: audit
 
@@ -393,14 +438,14 @@ jobs:
 
       - name: "📖 Read Build Configuration"
         id: build_config
-        uses: pietrobolcato/action-read-yaml@9f13718d61111b69f30ab4ac683e67a56d254e1d # 1.1.0
+        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
         continue-on-error: true
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
       - name: "🔑 Generate GitHub App Token"
         id: generate-token
-        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         with:
           app-id: 1045853
           private-key: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}
@@ -427,3 +472,25 @@ jobs:
             echo "$MERGE_OUTPUT"
             exit 1
           fi
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    if: always()
+    needs: [pr_info, wait_for_ready, check_dependabot_changes, check_library_template_changes, check_paddle_config_changes, check_renovate_changes, automerge]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Export workflow trace
+        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        continue-on-error: true
+        with:
+          otlpEndpoint: grpc://api.honeycomb.io:443/
+          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
+          githubToken: ${{ secrets.GITHUB_TOKEN }}

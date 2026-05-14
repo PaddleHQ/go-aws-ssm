@@ -1,0 +1,67 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Automerge Skipped Comment
+description: |
+  Manages a sticky PR comment explaining why automerge was skipped.
+  When `reason` is non-empty, posts or updates the comment. When `reason`
+  is empty, deletes any existing comment so the PR is left clean on re-runs.
+
+inputs:
+  pr_number:
+    description: 'PR number to comment on'
+    required: true
+  check_name:
+    description: 'Human-friendly name of the check (shown in the comment body)'
+    required: true
+  reason:
+    description: 'Reason automerge was skipped. Empty clears the existing comment.'
+    required: false
+    default: ''
+  github_token:
+    description: 'GitHub token with pull-requests:write permission'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: "💬 Manage automerge status comment"
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        REASON: ${{ inputs.reason }}
+        CHECK_NAME: ${{ inputs.check_name }}
+      run: |
+        set -euo pipefail
+
+        MARKER="<!-- automerge-status -->"
+
+        EXISTING=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+          --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" | head -n 1)
+
+        if [ -z "${REASON}" ]; then
+          if [ -n "${EXISTING}" ]; then
+            echo "Clearing previous automerge-skipped comment (${EXISTING})"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING}"
+          else
+            echo "No previous automerge-skipped comment to clear"
+          fi
+          exit 0
+        fi
+
+        BODY="${MARKER}
+        🤖 **Automerge skipped**
+
+        The \`${CHECK_NAME}\` check determined this PR is not eligible for auto-merge:
+
+        > ${REASON}
+
+        Please review and merge manually if appropriate."
+
+        if [ -n "${EXISTING}" ]; then
+          echo "Updating automerge-skipped comment (${EXISTING})"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING}" -f body="${BODY}"
+        else
+          echo "Creating automerge-skipped comment"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="${BODY}"
+        fi

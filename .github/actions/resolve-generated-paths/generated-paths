@@ -1,0 +1,17 @@
+# DO NOT EDIT - synced from go-library-template
+#
+# Patterns (gitignore-style) for generated or boilerplate files that should be
+# excluded from code-size metrics: PR size labelling, test coverage filtering,
+# and any line-of-code tracking.
+#
+# Add per-repo additions to build-config.yaml under `generatedPaths`, e.g.:
+#
+#   generatedPaths:
+#     - build/**
+#     - api/generated/**
+
+go.mod
+go.sum
+**/mocks/**
+**/*.pb.go
+clients/php/**
