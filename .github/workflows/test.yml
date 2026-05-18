@@ -330,6 +330,7 @@ jobs:
         env:
           ENVIRONMENT: ci
           CGO_ENABLED: 1
+          GORACE: atexit_sleep_ms=50
         run: |
           gotestsum \
             --format testname \
@@ -487,6 +488,7 @@ jobs:
         env:
           ENVIRONMENT: ci
           CGO_ENABLED: 1
+          GORACE: atexit_sleep_ms=50
         run: |
           mapfile -t test_packages < <(go list ./... | grep -v "^github.com/${{ github.repository }}$")
 
