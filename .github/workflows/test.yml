@@ -132,9 +132,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
+          key: ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-
             ${{ runner.os }}-go-test-
 
       - name: Install test dependencies
@@ -143,6 +142,7 @@ jobs:
           go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@v0.0.14
 
       - name: Setup test databases
+        id: setup-databases
         uses: ./.github/actions/setup-databases
 
       - name: Setup Env
@@ -169,6 +169,26 @@ jobs:
             -buildvcs=true \
             -shuffle=on \
             ./...
+
+      - name: Snapshot Postgres template cache
+        if: always() && steps.setup-databases.outputs.testament-imported == 'true' && steps.setup-databases.outputs.postgres-template-cache-hit != 'true'
+        shell: bash
+        run: |
+          # Drop only per-test instances; templates and testament's stable base must persist into the tar.
+          sudo -u postgres psql -tAc \
+            "SELECT datname FROM pg_database WHERE datname LIKE 'testdb_tpl_%_inst_%'" \
+            | while read -r db; do
+                [ -n "$db" ] && sudo -u postgres psql -c "DROP DATABASE \"$db\""
+              done
+          sudo -u postgres psql -c "CHECKPOINT;"
+          sudo systemctl stop postgresql.service
+          # Wait for postgres process group to drain — systemctl stop is async, tar otherwise races it.
+          for _ in $(seq 1 30); do
+            pgrep -u postgres >/dev/null 2>&1 || break
+            sleep 1
+          done
+          sudo tar --zstd -cf /tmp/pg-template.tar.zst -C /var/lib/postgresql/${{ steps.setup-databases.outputs.postgres-major-version }} main
+          echo "Snapshot size: $(du -sh /tmp/pg-template.tar.zst | cut -f1)"
 
       - name: Convert test reports to CTRF
         if: always() && github.event_name == 'pull_request'
@@ -304,9 +324,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
+          key: ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-
             ${{ runner.os }}-go-test-
 
       - name: Install test dependencies
@@ -315,6 +334,7 @@ jobs:
           go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@v0.0.14
 
       - name: Setup test databases
+        id: setup-databases
         uses: ./.github/actions/setup-databases
 
       - name: Setup Env
@@ -344,6 +364,26 @@ jobs:
             -buildvcs=true \
             -shuffle=on \
             ./...
+
+      - name: Snapshot Postgres template cache
+        if: always() && steps.setup-databases.outputs.testament-imported == 'true' && steps.setup-databases.outputs.postgres-template-cache-hit != 'true'
+        shell: bash
+        run: |
+          # Drop only per-test instances; templates and testament's stable base must persist into the tar.
+          sudo -u postgres psql -tAc \
+            "SELECT datname FROM pg_database WHERE datname LIKE 'testdb_tpl_%_inst_%'" \
+            | while read -r db; do
+                [ -n "$db" ] && sudo -u postgres psql -c "DROP DATABASE \"$db\""
+              done
+          sudo -u postgres psql -c "CHECKPOINT;"
+          sudo systemctl stop postgresql.service
+          # Wait for postgres process group to drain — systemctl stop is async, tar otherwise races it.
+          for _ in $(seq 1 30); do
+            pgrep -u postgres >/dev/null 2>&1 || break
+            sleep 1
+          done
+          sudo tar --zstd -cf /tmp/pg-template.tar.zst -C /var/lib/postgresql/${{ steps.setup-databases.outputs.postgres-major-version }} main
+          echo "Snapshot size: $(du -sh /tmp/pg-template.tar.zst | cut -f1)"
 
       - name: Convert test reports to CTRF
         if: always()
@@ -470,10 +510,13 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-test-race-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
+          key: ${{ runner.os }}-go-test-race-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-test-race-${{ hashFiles('**/go.sum') }}-
             ${{ runner.os }}-go-test-race-
+
+      - name: Setup test databases
+        id: setup-databases
+        uses: ./.github/actions/setup-databases
 
       - name: Setup Env
         run: |
@@ -498,6 +541,26 @@ jobs:
             -buildvcs=true \
             -shuffle=on \
             "${test_packages[@]}"
+
+      - name: Snapshot Postgres template cache
+        if: always() && steps.setup-databases.outputs.testament-imported == 'true' && steps.setup-databases.outputs.postgres-template-cache-hit != 'true'
+        shell: bash
+        run: |
+          # Drop only per-test instances; templates and testament's stable base must persist into the tar.
+          sudo -u postgres psql -tAc \
+            "SELECT datname FROM pg_database WHERE datname LIKE 'testdb_tpl_%_inst_%'" \
+            | while read -r db; do
+                [ -n "$db" ] && sudo -u postgres psql -c "DROP DATABASE \"$db\""
+              done
+          sudo -u postgres psql -c "CHECKPOINT;"
+          sudo systemctl stop postgresql.service
+          # Wait for postgres process group to drain — systemctl stop is async, tar otherwise races it.
+          for _ in $(seq 1 30); do
+            pgrep -u postgres >/dev/null 2>&1 || break
+            sleep 1
+          done
+          sudo tar --zstd -cf /tmp/pg-template.tar.zst -C /var/lib/postgresql/${{ steps.setup-databases.outputs.postgres-major-version }} main
+          echo "Snapshot size: $(du -sh /tmp/pg-template.tar.zst | cut -f1)"
 
   automerge_tests:
     name: Automerge unit tests with and without race detector

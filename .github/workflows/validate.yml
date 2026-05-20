@@ -46,17 +46,6 @@ jobs:
           private: ${{ github.event.repository.private }}
           private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
 
-      - name: Cache go modules
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-validate-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
-          restore-keys: |
-            ${{ runner.os }}-go-validate-${{ hashFiles('**/go.sum') }}-
-            ${{ runner.os }}-go-validate-
-
       - name: Install `govulncheck`, `gopls`, `modfmt` and `ghokin`
         run: |
           for cmd in govulncheck modernize modfmt ghokin; do
