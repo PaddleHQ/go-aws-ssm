@@ -1,9 +1,18 @@
 # DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
 
 name: Setup Databases
-description: |
-  This action starts and configures any databases required for testing, and exports the DSN for `go-testament` to use.
-  Use `enableMySQL: true` in your `build-config.yaml` to enable MySQL.
+description: "Starts databases and exports DSNs for `go-testament`. Set `enableMySQL: true` in `build-config.yaml` for MySQL."
+
+outputs:
+  testament-imported:
+    description: "'true' if the consumer's go.mod requires go-testament"
+    value: ${{ steps.go_testament.outputs.imported }}
+  postgres-template-cache-hit:
+    description: "'true' if a Postgres template tar was restored from actions/cache"
+    value: ${{ steps.pg-cache.outputs.cache-hit }}
+  postgres-major-version:
+    description: "PostgreSQL major version detected on the runner (e.g. 17)"
+    value: ${{ steps.pg-detect.outputs.version }}
 
 runs:
   using: "composite"
@@ -30,10 +39,64 @@ runs:
       with:
         config: ${{ github.workspace }}/build-config.yaml
 
+    - name: Detect PostgreSQL major version
+      id: pg-detect
+      if: steps.go_testament.outputs.imported == 'true'
+      shell: bash
+      run: |
+        version=$(ls /etc/postgresql 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1)
+        if [ -z "$version" ]; then
+          echo "Error: no PostgreSQL installation found under /etc/postgresql/" >&2
+          exit 1
+        fi
+        echo "version=${version}" >> "$GITHUB_OUTPUT"
+        echo "PostgreSQL major version: ${version}"
+
+    - name: Compute Postgres template cache key
+      id: pg-cache-key
+      if: steps.go_testament.outputs.imported == 'true'
+      shell: bash
+      run: |
+        if [ -d "${GITHUB_WORKSPACE}/database/migrations" ]; then
+          hash=$(find "${GITHUB_WORKSPACE}/database/migrations" -type f -print0 \
+            | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+        elif [ -d "${GITHUB_WORKSPACE}/migrations" ]; then
+          hash=$(find "${GITHUB_WORKSPACE}/migrations" -type f -print0 \
+            | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+        else
+          hash="no-migrations"
+        fi
+        # Pin testament version into the key: its template-name hash algorithm changes between versions.
+        testament_version=$(go list -m -f '{{.Version}}' \
+          github.com/PaddleHQ/go-testament/v3 2>/dev/null \
+          || go list -m -f '{{.Version}}' \
+            github.com/PaddleHQ/go-testament/v4 2>/dev/null \
+          || echo "unknown")
+        echo "hash=${hash}" >> "$GITHUB_OUTPUT"
+        echo "testament-version=${testament_version}" >> "$GITHUB_OUTPUT"
+        echo "Migrations hash: ${hash}, testament: ${testament_version}"
+
+    - name: Restore Postgres template cache
+      id: pg-cache
+      if: steps.go_testament.outputs.imported == 'true'
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: /tmp/pg-template.tar.zst
+        key: ${{ runner.os }}-pg${{ steps.pg-detect.outputs.version }}-template-testament${{ steps.pg-cache-key.outputs.testament-version }}-${{ steps.pg-cache-key.outputs.hash }}
+
     - name: Start PostgreSQL
       if: steps.go_testament.outputs.imported == 'true'
       shell: bash
       run: |
+        if [ "${{ steps.pg-cache.outputs.cache-hit }}" = "true" ]; then
+          sudo systemctl stop postgresql.service || true
+          sudo rm -rf /var/lib/postgresql/${{ steps.pg-detect.outputs.version }}/main
+          sudo mkdir -p /var/lib/postgresql/${{ steps.pg-detect.outputs.version }}
+          sudo tar --zstd -xf /tmp/pg-template.tar.zst -C /var/lib/postgresql/${{ steps.pg-detect.outputs.version }}/
+          sudo chown -R postgres:postgres /var/lib/postgresql/${{ steps.pg-detect.outputs.version }}/main
+          sudo chmod 0700 /var/lib/postgresql/${{ steps.pg-detect.outputs.version }}/main
+        fi
+
         sudo systemctl start postgresql.service
         pg_isready
         sudo -u postgres psql -c "ALTER SYSTEM SET max_connections TO '2000';"
@@ -41,8 +104,11 @@ runs:
         sudo systemctl restart postgresql.service
         pg_isready
 
-        sudo -u postgres psql -c "CREATE USER runner WITH SUPERUSER CREATEDB REPLICATION PASSWORD 'hunter2'"
-        sudo -u postgres psql -c "CREATE DATABASE testdatabase WITH OWNER runner"
+        # NOT EXISTS: cache restore brings the role back; recreating changes the OID.
+        sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='runner'" | grep -q 1 \
+          || sudo -u postgres psql -c "CREATE USER runner WITH SUPERUSER CREATEDB REPLICATION PASSWORD 'hunter2'"
+        sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='testdatabase'" | grep -q 1 \
+          || sudo -u postgres psql -c "CREATE DATABASE testdatabase WITH OWNER runner"
 
         echo "TESTAMENT_POSTGRES_DSN=host=127.0.0.1 port=5432 user=runner password=hunter2 dbname=testdatabase sslmode=require" >> "$GITHUB_ENV"
 
