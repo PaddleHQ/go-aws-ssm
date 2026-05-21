@@ -45,6 +45,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           private: ${{ github.event.repository.private }}
           private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: validate
 
       - name: Install `govulncheck`, `gopls`, `modfmt` and `ghokin`
         run: |
