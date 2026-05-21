@@ -33,6 +33,17 @@ inputs:
       call `git credential-cache exit` after you have finished with the token.
     default: 'true'
     required: false
+  cache-suffix:
+    description: >
+      Optional suffix appended to the Go deps cache key. Use for jobs whose
+      build cache content differs from the default (e.g. the race job, which
+      compiles every package with -race and so produces distinct GOCACHE
+      entries from non-race jobs). Without a per-job suffix, race and
+      non-race jobs collide on the same cache key — only one save wins per
+      run, leaving the loser's compile artefacts uncached on subsequent
+      runs. Pass 'race' from the race job; leave empty for everything else.
+    default: ''
+    required: false
 
 outputs:
   go-mod-version:
@@ -61,7 +72,19 @@ runs:
       with:
         go-version: '${{ steps.split.outputs._0 }}.${{ steps.split.outputs._1 }}'
         check-latest: true
-        cache: true
+        cache: false
+
+    - name: Cache Go modules + build cache
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: setup-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.go-mod-version }}${{ inputs.cache-suffix != '' && format('-{0}', inputs.cache-suffix) || '' }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          setup-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.go-mod-version }}${{ inputs.cache-suffix != '' && format('-{0}', inputs.cache-suffix) || '' }}-
+          setup-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.go-version.outputs.go-mod-version }}-
+          setup-go-${{ runner.os }}-${{ runner.arch }}-go-
 
     - name: Create a GitHub App Token
       uses: actions/create-github-app-token@c1a285145b9d317df6ced56c09f525b5c2b6f755 # v1.11.1

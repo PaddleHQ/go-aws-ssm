@@ -1,0 +1,51 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Snapshot Postgres templates
+description: |
+  Tars `/var/lib/postgresql/<v>/main` to `/tmp/pg-template.tar.zst` so the
+  Postgres template cache populated by `setup-databases` (which restores the
+  same tar via actions/cache) refreshes for future runs.
+
+  Pair with `./.github/actions/setup-databases`. setup-databases restores
+  the tar before PG starts; this action snapshots it after tests so
+  actions/cache's auto-save uploads the new entry. Call with `if: always()`
+  so a failing test step doesn't skip the snapshot — testament populates
+  the templates in TestMain before any test runs.
+
+  Skips the work if testament wasn't imported by the consumer service, or
+  if the cache was a hit (no new content to save). Drops per-test instance
+  DBs before tarring so they don't bloat the artefact.
+
+inputs:
+  testament-imported:
+    description: setup-databases' `testament-imported` output ('true' / 'false')
+    required: true
+  postgres-template-cache-hit:
+    description: setup-databases' `postgres-template-cache-hit` output ('true' / 'false' / empty)
+    required: true
+  postgres-major-version:
+    description: setup-databases' `postgres-major-version` output (e.g. '17')
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Snapshot
+      if: inputs.testament-imported == 'true' && inputs.postgres-template-cache-hit != 'true'
+      shell: bash
+      run: |
+        # Drop per-test instance DBs only; templates and testament's stable base must persist.
+        sudo -u postgres psql -tAc \
+          "SELECT datname FROM pg_database WHERE datname LIKE 'testdb_tpl_%_inst_%'" \
+          | while read -r db; do
+              [ -n "$db" ] && sudo -u postgres psql -c "DROP DATABASE \"$db\""
+            done
+        sudo -u postgres psql -c "CHECKPOINT;"
+        sudo systemctl stop postgresql.service
+        # Wait for postgres process group to drain — systemctl stop is async, tar otherwise races it.
+        for _ in $(seq 1 30); do
+          pgrep -u postgres >/dev/null 2>&1 || break
+          sleep 1
+        done
+        sudo tar --zstd -cf /tmp/pg-template.tar.zst -C /var/lib/postgresql/${{ inputs.postgres-major-version }} main
+        echo "Snapshot size: $(du -sh /tmp/pg-template.tar.zst | cut -f1)"
