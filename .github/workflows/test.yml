@@ -412,6 +412,12 @@ jobs:
       - read-config
     runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
       - name: Set up Go
         uses: ./.github/actions/setup-go
         with:
