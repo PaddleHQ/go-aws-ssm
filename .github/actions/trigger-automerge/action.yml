@@ -16,6 +16,11 @@ runs:
   using: "composite"
   steps:
     - name: Attempt to automerge
+      # continue-on-error so the calling job doesn't fail when the target
+      # workflow isn't yet on the default branch (e.g. the sync PR that
+      # first introduces automerge.yml). Dispatch is fire-and-forget; the
+      # PR can always be merged manually.
+      continue-on-error: true
       if: fromJSON(inputs.event).pull_request != null &&
           inputs.hasAutoApproverPrivateKey == 'true' &&
           fromJSON(inputs.event).pull_request.merged == false &&
@@ -31,6 +36,7 @@ runs:
           }'
 
     - name: Attempt to auto ready for review
+      continue-on-error: true
       if: fromJSON(inputs.event).pull_request != null &&
           fromJSON(inputs.event).pull_request.draft == true
       uses: step-security/workflow-dispatch@821295dcc146c6330b5a388c03d56f9c90e667fc # v1.3.1

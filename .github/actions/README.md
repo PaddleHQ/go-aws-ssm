@@ -7,6 +7,7 @@ Shared workflow building blocks. Listed here with a one-line purpose and, for ac
 | [`setup-go`](./setup-go/action.yml) | Install Go (via `actions/setup-go`), authenticate to private PaddleHQ modules, run `go mod download all`. **Owns the Go deps cache** (see below). |
 | [`setup-databases`](./setup-databases/action.yml) | Start Postgres (+ MySQL on opt-in), create the `runner` role and `testdatabase`, export `TESTAMENT_POSTGRES_DSN`. **Restores the Postgres template cache** (see below). |
 | [`snapshot-postgres-templates`](./snapshot-postgres-templates/action.yml) | Tar the PG data dir at job end so `actions/cache`'s post-step uploads it. **Saves the Postgres template cache** (the other half of the lifecycle owned by `setup-databases`). |
+| [`lint-scope`](./lint-scope/action.yml) | Decide whether `golangci-lint` should run, and if so against which packages. Outputs `skip`, `pkgs`, `new-from-rev`. Used by `go-lint.yml` (main) and `go-lint-experimental.yml` (different `config-glob` input, same logic). |
 | [`otel-export`](./otel-export/action.yml) | Export the workflow trace to Honeycomb at job end. |
 | [`resolve-generated-paths`](./resolve-generated-paths/action.yml) | Expand the `generated-paths` patterns into a concrete list (used by coverage filtering). |
 | [`trigger-automerge`](./trigger-automerge/action.yml) | Kick the automerge workflow once required checks pass. |
