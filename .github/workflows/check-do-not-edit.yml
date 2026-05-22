@@ -14,15 +14,10 @@ concurrency:
 
 jobs:
   check-do-not-edit:
-    runs-on: ubuntu-latest
+    runs-on: go-2-core
     name: Check for DO NOT EDIT files
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Skip if the PR was created by paddle-repo-file-sync[bot]
         if: github.actor == 'paddle-repo-file-sync[bot]'
         run: |
@@ -91,16 +86,11 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [check-do-not-edit]
-    runs-on: ubuntu-latest
+    runs-on: go-2-core
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Export workflow trace
         uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true

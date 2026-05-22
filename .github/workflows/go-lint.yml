@@ -24,16 +24,11 @@ permissions:
 jobs:
   read-config:
     name: Read build configuration
-    runs-on: ubuntu-24.04
+    runs-on: go-4-core
     outputs:
       runsOn: ${{ steps.build_config.outputs.runsOn }}
       lintTimeout: ${{ steps.build_config.outputs.lintTimeout }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -42,7 +37,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -50,13 +45,8 @@ jobs:
     name: Ensure code passes linting rules
     needs:
       - read-config
-    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Check out code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -81,27 +71,16 @@ jobs:
 
       - name: Determine lint scope
         id: scope
-        run: |
-          base_sha="${{ steps.base.outputs.sha }}"
-          if git diff --name-only "$base_sha"..HEAD | grep -qE '(^|/)\.golangci\.(yml|yaml)$'; then
-            # Lint config changed — lint everything so new rules are enforced repo-wide.
-            echo "pkgs=./..." >> "$GITHUB_OUTPUT"
-            echo "new_from_rev=" >> "$GITHUB_OUTPUT"
-          else
-            pkgs=$(git diff --name-only --diff-filter=d "$base_sha"..HEAD -- '*.go' \
-              | xargs -I{} dirname {} \
-              | sort -u \
-              | sed 's|^|./|' \
-              | tr '\n' ' ')
-            echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
-            echo "new_from_rev=--new-from-rev=$base_sha" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/lint-scope
+        with:
+          base-sha: ${{ steps.base.outputs.sha }}
 
       - name: golangci-lint
+        if: steps.scope.outputs.skip != 'true'
         uses: step-security/golangci-lint-action@1797facf9ea427614d729a4e9cab0fae1a7852d9 # v9.2.0
         with:
           version: v2.5.0
-          args: --timeout=${{ needs.read-config.outputs.lintTimeout || '5m' }} ${{ steps.scope.outputs.new_from_rev }} ${{ steps.scope.outputs.pkgs }}
+          args: --timeout=${{ needs.read-config.outputs.lintTimeout || '5m' }} ${{ steps.scope.outputs.new-from-rev }} ${{ steps.scope.outputs.pkgs }}
           verify: false
           debug: cache
 
@@ -115,16 +94,11 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [lint]
-    runs-on: ubuntu-latest
+    runs-on: go-2-core
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Export workflow trace
         uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true

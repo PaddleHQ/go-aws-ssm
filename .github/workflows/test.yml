@@ -28,17 +28,12 @@ permissions:
 jobs:
   read-config:
     name: Read build configuration
-    runs-on: ubuntu-24.04
+    runs-on: go-4-core
     outputs:
       testRunner: ${{ steps.build_config.outputs.testRunner }}
       separateRaceTests: ${{ steps.build_config.outputs['separateRaceTests'] }}
       runsOn: ${{ steps.build_config.outputs.runsOn }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -47,22 +42,17 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
   ecr-login:
     name: ECR login for test container
-    runs-on: ubuntu-24.04
+    runs-on: go-4-core
     needs: read-config
     outputs:
       token: ${{ steps.ecr-token.outputs.token }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Configure AWS credentials
         if: needs.read-config.outputs.testRunner != ''
         uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
@@ -86,17 +76,12 @@ jobs:
     needs:
       - read-config
       - ecr-login
-    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
     container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
     steps:
       - name: Mask ECR token in logs
         if: needs.read-config.outputs.testRunner != ''
         run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
-
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
 
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -201,7 +186,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -257,17 +242,12 @@ jobs:
     needs:
       - read-config
       - ecr-login
-    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
     container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
     steps:
       - name: Mask ECR token in logs
         if: needs.read-config.outputs.testRunner != ''
         run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
-
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
 
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -375,7 +355,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -430,19 +410,8 @@ jobs:
     if: needs.read-config.outputs.separateRaceTests == 'true'
     needs:
       - read-config
-    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
-          persist-credentials: false
-
       - name: Set up Go
         uses: ./.github/actions/setup-go
         with:
@@ -516,13 +485,8 @@ jobs:
         needs.test-combined.result == 'success' ||
         (needs.test.result == 'success' && needs.race.result == 'success')
       )
-    runs-on: ubuntu-24.04
+    runs-on: go-4-core
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -539,16 +503,11 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [read-config, ecr-login, test, test-combined, race, automerge_tests]
-    runs-on: ubuntu-latest
+    runs-on: go-2-core
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Fetch workflow run timestamps
         id: run_times
         shell: bash

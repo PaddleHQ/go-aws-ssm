@@ -37,14 +37,9 @@ jobs:
 
   pr_info:
     name: "Get PR Info"
-    runs-on: ubuntu-latest
+    runs-on: go-2-core
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Check sender
         env:
           SENDER: ${{ github.event.sender.login }}
@@ -91,21 +86,43 @@ jobs:
           mergeBase=$(git merge-base origin/${{ steps.pr-info.outputs.base_ref }} HEAD)
           echo "merge_base=${mergeBase}" >> "$GITHUB_OUTPUT"
 
+      - name: "📝 List changed files"
+        id: changed
+        env:
+          MERGE_BASE: ${{ steps.merge-base.outputs.merge_base }}
+        run: |
+          # Emitted as a multiline output so downstream gate jobs can do
+          # their scope check against a shared file list (single source of
+          # truth for `git diff --name-only`).
+          {
+            echo 'files<<EOF'
+            git diff --name-only "${MERGE_BASE}"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
     outputs:
       draft: ${{ steps.pr-info.outputs.draft }}
       user_login: ${{ steps.pr-info.outputs.user_login }}
       labels: ${{ steps.pr-info.outputs.labels }}
       head_ref: ${{ steps.pr-info.outputs.head_ref }}
       merge_base: ${{ steps.merge-base.outputs.merge_base }}
+      changed_files: ${{ steps.changed.outputs.files }}
 
 
   # --
   # Wait for the PR to be ready for automerge
+  #
+  # `permissions:` is set explicitly to `checks: read` only, overriding the
+  # broader workflow-level scope. This narrows the GITHUB_TOKEN that the
+  # third-party `wechuli/allcheckspassed` action receives — so even a
+  # compromised version of that action cannot reach `pull-requests: write`.
   wait_for_ready:
     name: Check source and wait for PR to be ready
-    runs-on: ubuntu-latest
+    runs-on: go-4-core
     needs:
       - pr_info
+    permissions:
+      checks: read
 
     if: |-
       needs.pr_info.outputs.draft == 'false' && (
@@ -115,11 +132,6 @@ jobs:
       )
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: "🔐 Verify Automerge Secret Available"
         id: check-secret
         run: |
@@ -171,23 +183,24 @@ jobs:
   # Check the source and the changes of the PR
   # One of the following jobs must pass for the PR to be merged automatically
 
-  check_dependabot_changes:
-    name: "[Automerge/Check] 🤖 Validate Dependabot Changes"
+  # Two independent dependabot gates, each scoped to one surface. A PR
+  # passes when it's *only* changes within that surface AND those changes
+  # meet the trust criteria. Out-of-scope PRs (touching other files, or
+  # mixing surfaces) exit silently — the existing OR in the `automerge`
+  # job's `if:` lets either gate green-light a merge.
+
+  check_dependabot_go_deps:
+    name: "[Automerge/Check] 🤖 Validate Go dependency updates"
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: ubuntu-latest
+    runs-on: go-4-core
 
     if: |-
       needs.wait_for_ready.outputs.can_automerge == 'true' &&
       needs.pr_info.outputs.user_login == 'app/dependabot'
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -195,43 +208,122 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: "🔍 Analyze Dependency Changes"
-        id: check-external
+      - name: "🔍 Validate Go dependency updates"
+        id: check
+        env:
+          CHANGED_FILES: ${{ needs.pr_info.outputs.changed_files }}
         run: |
-          echo "🔍 Checking dependency changes in go.mod..."
-          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- 'go.mod'; then
-            REASON="No changes detected in \`go.mod\` — automerge only applies to PaddleHQ dependency updates."
-            echo "ℹ️ ${REASON}"
-            {
-              echo "can_automerge=false"
-              echo "reason=${REASON}"
-            } >> "$GITHUB_OUTPUT"
-          elif git diff --quiet -G "github.com/PaddleHQ/" ${{ needs.pr_info.outputs.merge_base }} -- go.mod; then
-            REASON="No PaddleHQ dependencies updated — third-party dependency updates require manual review."
+          # Silent exit if any changed file is outside go.mod/go.sum -
+          # another gate may apply.
+          if [ -z "${CHANGED_FILES}" ] || echo "${CHANGED_FILES}" | grep -qvE '^(go\.mod|go\.sum)$'; then
+            echo "ℹ️ Not a pure go.mod/go.sum diff - not this gate's responsibility"
+            exit 0
+          fi
+
+          if git diff --quiet -G "github.com/PaddleHQ/" ${{ needs.pr_info.outputs.merge_base }} -- go.mod; then
+            REASON="Third-party Go dependency updates require manual review."
             echo "⚠️ ${REASON}"
             echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
-          else
-            echo "✅ PaddleHQ dependencies updated - automerge enabled"
-            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          echo "✅ PaddleHQ Go dependency update - automerge enabled"
+          echo "can_automerge=true" >> "$GITHUB_OUTPUT"
 
       - name: "💬 Manage Automerge Status Comment"
         uses: ./.github/actions/automerge-skipped-comment
         with:
           pr_number: ${{ github.event.inputs.pr_number }}
-          check_name: "Validate Dependabot Changes"
-          reason: ${{ steps.check-external.outputs.reason }}
+          check_name: "Validate Go dependency updates"
+          reason: ${{ steps.check.outputs.reason }}
           github_token: ${{ github.token }}
 
     outputs:
-      can_automerge: ${{ steps.check-external.outputs.can_automerge }}
+      can_automerge: ${{ steps.check.outputs.can_automerge }}
+
+  check_dependabot_action_refs:
+    name: "[Automerge/Check] 🛡️ Validate workflow action updates"
+    needs:
+      - pr_info
+      - wait_for_ready
+    runs-on: go-4-core
+
+    if: |-
+      needs.wait_for_ready.outputs.can_automerge == 'true' &&
+      needs.pr_info.outputs.user_login == 'app/dependabot'
+
+    steps:
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.pr_info.outputs.head_ref }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: "🔍 Validate workflow action updates"
+        id: check
+        env:
+          CHANGED_FILES: ${{ needs.pr_info.outputs.changed_files }}
+        run: |
+          # Pre-vetted action publishers, pipe-separated for grep alternation.
+          # Keep in sync with `check-action-security.yml`.
+          TRUSTED_ORGS_REGEX='(actions|github|step-security|paddlehq)'
+
+          # Silent exit if any changed file is outside the workflow/action
+          # tree - another gate may apply.
+          if [ -z "${CHANGED_FILES}" ] || echo "${CHANGED_FILES}" | grep -qvE '^\.github/(workflows|actions)/'; then
+            echo "ℹ️ Not a pure workflow/action diff - not this gate's responsibility"
+            exit 0
+          fi
+
+          # Two greps: first picks added `uses:` lines pointing at a remote
+          # owner (the `[A-Za-z0-9_-]+/` rules out local `./...` composite
+          # refs — `.` is intentionally not in the char class); second drops
+          # trusted orgs case-insensitively. `|| true` keeps the pipeline
+          # from failing on no-match.
+          UNTRUSTED=$(git diff ${{ needs.pr_info.outputs.merge_base }} -- '.github/workflows' '.github/actions' \
+            | grep -E '^\+[[:space:]]+(- )?uses:[[:space:]]*["'\'']?[A-Za-z0-9_-]+/' \
+            | grep -ivE "uses:[[:space:]]*[\"']?${TRUSTED_ORGS_REGEX}/" \
+            || true)
+
+          if [ -n "${UNTRUSTED}" ]; then
+            REASON="Untrusted third-party action reference(s) added. Allowed orgs: actions, github, step-security, paddlehq."
+            echo "⚠️ ${REASON}"
+            printf '%s\n' "${UNTRUSTED}"
+            {
+              echo 'reason<<EOF'
+              echo "${REASON}"
+              echo ''
+              echo '```diff'
+              printf '%s\n' "${UNTRUSTED}"
+              echo '```'
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "✅ All workflow/action bumps target trusted orgs - automerge enabled"
+          echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+
+      - name: "💬 Manage Automerge Status Comment"
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Validate workflow action updates"
+          reason: ${{ steps.check.outputs.reason }}
+          github_token: ${{ github.token }}
+
+    outputs:
+      can_automerge: ${{ steps.check.outputs.can_automerge }}
+
+
 
   check_library_template_changes:
     name: "[Automerge/Check] 📝 Check GO Library Template changes"
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: ubuntu-latest
+    runs-on: go-4-core
 
     if: |-
       needs.wait_for_ready.outputs.can_automerge == 'true' &&
@@ -243,11 +335,6 @@ jobs:
       )
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -257,10 +344,20 @@ jobs:
 
       - name: "🔍 Analyze Go Library Template Changes"
         id: check-files
+        env:
+          CHANGED_FILES: ${{ needs.pr_info.outputs.changed_files }}
         run: |
-          echo "🔍 Checking which files were modified by from a library template sync..."
-          # Check if only safe files were modified (workflows and dependabot config)
-          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- ':!.github/actions' ':!.github/workflows' ':!.github/dependabot.yml' ':!.github/pull_request_template.md' ':!.github/release.yml' ':!.github/actionlint.yaml'; then
+          echo "🔍 Checking which files were modified by a library template sync..."
+          # Files a library-template sync is allowed to touch. Anything else
+          # → manual review.
+          ALLOWED=(
+            -e '^\.github/(actions|workflows)/'
+            -e '^\.github/dependabot\.yml$'
+            -e '^\.github/pull_request_template\.md$'
+            -e '^\.github/release\.yml$'
+            -e '^\.github/actionlint\.yaml$'
+          )
+          if [ -n "${CHANGED_FILES}" ] && ! echo "${CHANGED_FILES}" | grep -qvE "${ALLOWED[@]}"; then
             echo "✅ Only safe template files modified (workflows/dependabot) - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           else
@@ -285,7 +382,7 @@ jobs:
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: ubuntu-latest
+    runs-on: go-4-core
 
     if: |-
       needs.wait_for_ready.outputs.can_automerge == 'true' &&
@@ -293,11 +390,6 @@ jobs:
       contains(needs.pr_info.outputs.labels, 'origin:paddle-config')
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -307,7 +399,7 @@ jobs:
 
       - name: "📖 Read Build Configuration"
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -345,7 +437,7 @@ jobs:
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: ubuntu-latest
+    runs-on: go-4-core
 
     if: |-
       needs.wait_for_ready.outputs.can_automerge == 'true' &&
@@ -356,11 +448,6 @@ jobs:
       )
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -370,16 +457,17 @@ jobs:
 
       - name: "📖 Read Build Configuration"
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
       - name: "🔍 Analyze Template Changes"
         id: check-files
+        env:
+          CHANGED_FILES: ${{ needs.pr_info.outputs.changed_files }}
         run: |
-          echo "🔍 Checking which files were modified by from a library template sync..."
-          # Check if only safe files were modified (workflows and dependabot config)
-          if git diff --quiet ${{ needs.pr_info.outputs.merge_base }} -- ':!*.yaml.tmpl'; then
+          echo "🔍 Checking which files were modified by a renovate sync..."
+          if [ -n "${CHANGED_FILES}" ] && ! echo "${CHANGED_FILES}" | grep -qvE '\.yaml\.tmpl$'; then
             echo "✅ Only safe template files modified - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           else
@@ -404,12 +492,13 @@ jobs:
 
   automerge:
     name: "[Automerge/Merge] 🚀 Auto Approve and Merge"
-    runs-on: ubuntu-latest
+    runs-on: go-4-core
 
     needs:
       - pr_info
       - wait_for_ready
-      - check_dependabot_changes
+      - check_dependabot_go_deps
+      - check_dependabot_action_refs
       - check_library_template_changes
       - check_paddle_config_changes
       - check_renovate_changes
@@ -418,18 +507,14 @@ jobs:
     # always() ensures this is a `or` condition and does not depend on ALL the checks passing, but only one.
     if: |-
       always() && (
-        needs.check_dependabot_changes.outputs.can_automerge == 'true' ||
+        needs.check_dependabot_go_deps.outputs.can_automerge == 'true' ||
+        needs.check_dependabot_action_refs.outputs.can_automerge == 'true' ||
         needs.check_library_template_changes.outputs.can_automerge == 'true' ||
         needs.check_paddle_config_changes.outputs.can_automerge == 'true' ||
         needs.check_renovate_changes.outputs.can_automerge == 'true'
       )
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -438,14 +523,14 @@ jobs:
 
       - name: "📖 Read Build Configuration"
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         continue-on-error: true
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
       - name: "🔑 Generate GitHub App Token"
         id: generate-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: 1045853
           private-key: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}
@@ -476,17 +561,12 @@ jobs:
   otel_cicd_export:
     name: OpenTelemetry Export Trace
     if: always()
-    needs: [pr_info, wait_for_ready, check_dependabot_changes, check_library_template_changes, check_paddle_config_changes, check_renovate_changes, automerge]
-    runs-on: ubuntu-latest
+    needs: [pr_info, wait_for_ready, check_dependabot_go_deps, check_dependabot_action_refs, check_library_template_changes, check_paddle_config_changes, check_renovate_changes, automerge]
+    runs-on: go-2-core
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Export workflow trace
         uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true

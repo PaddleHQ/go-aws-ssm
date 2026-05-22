@@ -19,13 +19,8 @@ permissions:
 jobs:
   common-lint:
     name: Ensure code passes generic linting rules
-    runs-on: ubuntu-latest
+    runs-on: go-4-core
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Check out code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -57,16 +52,11 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [common-lint]
-    runs-on: ubuntu-latest
+    runs-on: go-2-core
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Export workflow trace
         uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true

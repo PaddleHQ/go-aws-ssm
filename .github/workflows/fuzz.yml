@@ -38,16 +38,11 @@ concurrency:
 jobs:
   discover:
     name: Discover fuzz targets
-    runs-on: ubuntu-24.04
+    runs-on: go-4-core
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
       has_targets: ${{ steps.list.outputs.has_targets }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -95,7 +90,7 @@ jobs:
     name: Fuzz ${{ matrix.name }}
     needs: discover
     if: needs.discover.outputs.has_targets == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: go-4-core
     timeout-minutes: 90
     permissions:
       contents: write
@@ -105,14 +100,9 @@ jobs:
       max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Create GitHub App Token
         id: app-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: 923765
           private-key: ${{ secrets.REPO_FILE_SYNC_PRIVATE_KEY }}
@@ -219,16 +209,11 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [discover, fuzz]
-    runs-on: ubuntu-latest
+    runs-on: go-2-core
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Export workflow trace
         uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true

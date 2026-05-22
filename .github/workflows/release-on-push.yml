@@ -17,17 +17,12 @@ permissions:
 jobs:
   release_on_push:
     name: Create release on push to main branch
-    runs-on: ubuntu-latest
+    runs-on: go-4-core
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Create release based on label
-        uses: step-security/release-on-push-action@cb8d0f4644b90de8de1c49113ad7e66f13224c3d # v0.28.5
+        uses: step-security/release-on-push-action@b9dee0685e99e905fe90cba8ba9ed92c7f3806b4 # v0.28.6
         with:
           bump_version_scheme: norelease
           use_github_release_notes: true
@@ -51,16 +46,11 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [release_on_push]
-    runs-on: ubuntu-latest
+    runs-on: go-2-core
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Export workflow trace
         uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true

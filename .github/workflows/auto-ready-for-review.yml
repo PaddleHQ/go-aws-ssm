@@ -31,23 +31,27 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.inputs.pr_number }}
   cancel-in-progress: true
 
-permissions:
-  checks: read
-  contents: read
-  pull-requests: write # required for `auto-ready-for-review` to mark the PR as ready for review
+# No top-level `permissions:` — every job declares its own minimum scope.
+# This isolates the third-party `wechuli/allcheckspassed` action in its own
+# job (`wait_for_checks`) where the GITHUB_TOKEN it inherits has only
+# `checks: read`, with no access to `pull-requests: write`.
+permissions: {}
 
 jobs:
 
-  auto_ready_for_review:
-    name: "AutoReady for Review"
-    runs-on: ubuntu-latest
+  # --
+  # Cheap pre-flight: only inspects PR state, no third-party actions involved.
+  # Scoped to `pull-requests: read` so the gh CLI can read labels and draft
+  # state but cannot mutate the PR.
+  gate:
+    name: "🧠 Gate: label + draft check"
+    runs-on: go-2-core
+    permissions:
+      pull-requests: read
+    outputs:
+      ok: ${{ steps.gate.outputs.ok }}
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -72,10 +76,24 @@ jobs:
               echo "ok=false" >> "$GITHUB_OUTPUT"
             fi
 
+  # --
+  # Wait for upstream checks via the third-party `wechuli/allcheckspassed`
+  # action. Isolated in its own job so its GITHUB_TOKEN is scoped to
+  # `checks: read` only — even a compromised version of the action cannot
+  # reach the PR-mutation scope held by the downstream `mark_ready` job.
+  wait_for_checks:
+    name: "⏳ Wait for checks"
+    runs-on: go-2-core
+    needs: gate
+    if: needs.gate.outputs.ok == 'true'
+    permissions:
+      checks: read
+    outputs:
+      passed: ${{ steps.confirm.outputs.passed }}
+
+    steps:
       - name: "⏳ Wait for calling workflow to be ready"
-        if: |-
-          steps.gate.outputs.ok == 'true' &&
-          github.event.inputs.workflow != ''
+        if: github.event.inputs.workflow != ''
         uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
         id: check-caller
         with:
@@ -86,9 +104,7 @@ jobs:
           checks_include: ${{ github.event.inputs.workflow }}
 
       - name: "⏳ Wait for All Required Checks to Pass"
-        if: |-
-          steps.gate.outputs.ok == 'true' &&
-          steps.check-caller.outcome == 'success'
+        if: steps.check-caller.outcome == 'success'
         uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
         id: check-all
         with:
@@ -98,16 +114,45 @@ jobs:
           commit_sha: ${{ inputs.head_sha }}
           checks_exclude: (AutoReady|StepSecurity).*
 
+      # Bubble the inner step's outcome to a job-level output, mirroring the
+      # original single-job gating: `mark_ready` runs only when `check-all`
+      # actually succeeded — not when it was skipped because the `workflow`
+      # input was empty.
+      - name: "Confirm all checks passed"
+        id: confirm
+        if: steps.check-all.outcome == 'success'
+        run: echo "passed=true" >> "$GITHUB_OUTPUT"
+
+  # --
+  # PR mutation: marks the PR ready and removes the trigger label. Holds
+  # `pull-requests: write`. Only runs if both prior jobs succeeded — gate
+  # passed AND all checks passed.
+  mark_ready:
+    name: "🔄 Mark PR ready"
+    runs-on: go-2-core
+    needs:
+      - gate
+      - wait_for_checks
+    if: needs.gate.outputs.ok == 'true' && needs.wait_for_checks.outputs.passed == 'true'
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.head_sha }}
+          persist-credentials: false
+
       - name: "🔑 Generate GitHub App Token" # github.token doesn't have permission to mark PR ready for review :(
         id: generate-token
-        if: steps.gate.outputs.ok == 'true' && steps.check-all.outcome == 'success'
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v1
         with:
           app-id: 1045853
           private-key: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}
 
       - name: "🔄 Mark PR ready for review" # github.token doesn't have permission to mark PR ready for review :(
-        if: steps.gate.outputs.ok == 'true' && steps.check-all.outcome == 'success'
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         shell: bash
@@ -115,7 +160,6 @@ jobs:
           gh pr ready "${{ inputs.pr_number }}"
 
       - name: "🧹 Remove auto label"
-        if: steps.gate.outputs.ok == 'true' && steps.check-all.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -125,17 +169,12 @@ jobs:
   otel_cicd_export:
     name: OpenTelemetry Export Trace
     if: always()
-    needs: [auto_ready_for_review]
-    runs-on: ubuntu-latest
+    needs: [gate, wait_for_checks, mark_ready]
+    runs-on: go-2-core
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Export workflow trace
         uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
         continue-on-error: true
