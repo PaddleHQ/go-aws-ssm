@@ -25,3 +25,14 @@ updates:
       otelcontrib-do-not-merge:
         patterns:
           - "go.opentelemetry.io/contrib/*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    labels:
+      - "norelease"
+    cooldown:
+      default-days: 8
