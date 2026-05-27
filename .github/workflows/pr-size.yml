@@ -19,6 +19,7 @@ jobs:
   pr_size:
     name: Label PRs with size and comment if too large
     runs-on: go-2-core
+    timeout-minutes: 10
     steps:
       - name: Check out code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -106,6 +107,7 @@ jobs:
     if: always()
     needs: [pr_size]
     runs-on: go-2-core
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read

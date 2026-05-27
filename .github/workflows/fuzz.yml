@@ -39,6 +39,7 @@ jobs:
   discover:
     name: Discover fuzz targets
     runs-on: go-4-core
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
       has_targets: ${{ steps.list.outputs.has_targets }}
@@ -210,6 +211,7 @@ jobs:
     if: always()
     needs: [discover, fuzz]
     runs-on: go-2-core
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read

@@ -18,6 +18,7 @@ jobs:
   check_build:
     name: Ensure code can build
     runs-on: go-4-core
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -47,6 +48,7 @@ jobs:
     if: always()
     needs: [check_build]
     runs-on: go-2-core
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read

@@ -25,6 +25,7 @@ jobs:
   read-config:
     name: Read build configuration
     runs-on: go-4-core
+    timeout-minutes: 5
     outputs:
       runsOn: ${{ steps.build_config.outputs.runsOn }}
       lintTimeout: ${{ steps.build_config.outputs.lintTimeout }}
@@ -46,6 +47,7 @@ jobs:
     needs:
       - read-config
     runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
+    timeout-minutes: 20
     steps:
       - name: Check out code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -95,6 +97,7 @@ jobs:
     if: always()
     needs: [lint]
     runs-on: go-2-core
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read
