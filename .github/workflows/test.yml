@@ -47,53 +47,19 @@ jobs:
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
-  ecr-login:
-    name: ECR login for test container
-    runs-on: go-4-core
-    timeout-minutes: 5
-    needs: read-config
-    outputs:
-      token: ${{ steps.ecr-token.outputs.token }}
-    steps:
-      - name: Configure AWS credentials
-        if: needs.read-config.outputs.testRunner != ''
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
-        with:
-          audience: sts.amazonaws.com
-          role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
-          role-to-assume: arn:aws:iam::067421297632:role/paddle-tfecr-gha-ecr-${{ github.event.repository.name }}
-          aws-region: us-east-1
-          role-duration-seconds: 900
-          retry-max-attempts: 3
-
-      - name: Get ECR login token
-        if: needs.read-config.outputs.testRunner != ''
-        id: ecr-token
-        run: |
-          echo "token=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})" >> "$GITHUB_OUTPUT"
-
   test:
-    name: Run tests and validate coverage
+    name: Run tests with coverage
     if: needs.read-config.outputs.separateRaceTests == 'true'
     needs:
       - read-config
-      - ecr-login
     runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
     timeout-minutes: 30
-    container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
     steps:
-      - name: Mask ECR token in logs
-        if: needs.read-config.outputs.testRunner != ''
-        run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
-
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
-
-      - name: Allow git in workspace (required for Go -buildvcs in container)
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -132,22 +98,65 @@ jobs:
                 echo "${source}=${target}" >> "$GITHUB_ENV"
             done
 
+      - name: Configure AWS credentials for ECR pull
+        if: needs.read-config.outputs.testRunner != ''
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          audience: sts.amazonaws.com
+          role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::067421297632:role/paddle-tfecr-gha-ecr-${{ github.event.repository.name }}
+          aws-region: us-east-1
+          role-duration-seconds: 900
+          retry-max-attempts: 3
+
+      - name: Log in to Amazon ECR
+        if: needs.read-config.outputs.testRunner != ''
+        uses: aws-actions/amazon-ecr-login@183a1442edf41672e66566b7fc560e297a290896 # v2.1.1
+
       - name: Run tests with coverage
         timeout-minutes: 20
         env:
           ENVIRONMENT: ci
           CGO_ENABLED: 1
+          TEST_IMAGE: ${{ needs.read-config.outputs.testRunner }}
         run: |
-          gotestsum \
-            --format testname \
-            --jsonfile test-report.json \
-            -- \
-            -coverprofile=cover.out \
-            -covermode=atomic \
-            -coverpkg ./... \
-            -buildvcs=true \
-            -shuffle=on \
+          set -euo pipefail
+          gotestsum_args=(
+            --format testname
+            --jsonfile test-report.json
+            --
+            -coverprofile=cover.out
+            -covermode=atomic
+            -coverpkg ./...
+            -buildvcs=true
+            -shuffle=on
             ./...
+          )
+
+          if [ -z "$TEST_IMAGE" ]; then
+            gotestsum "${gotestsum_args[@]}"
+            exit 0
+          fi
+
+          # Run go test inside the configured testRunner image. Host-side
+          # steps (checkout, setup-go, setup-databases, JS-based reporting)
+          # stay on the host so GHA's JS-Actions-in-Alpine-arm64 restriction
+          # doesn't bite. --network host lets the containerised tests reach
+          # databases setup-databases provisioned on the host. --user matches
+          # the host UID so output files (coverage, CTRF) are readable by
+          # subsequent host steps.
+          docker run --rm \
+            --network host \
+            --user "$(id -u):$(id -g)" \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -v "$(go env GOMODCACHE):/tmp/gomodcache" \
+            -v "$(go env GOCACHE):/tmp/gocache" \
+            -e HOME=/tmp \
+            -e GOMODCACHE=/tmp/gomodcache \
+            -e GOCACHE=/tmp/gocache \
+            -e ENVIRONMENT -e CGO_ENABLED \
+            "$TEST_IMAGE" \
+            gotestsum "${gotestsum_args[@]}"
 
       - name: Snapshot Postgres template cache
         if: always()
@@ -203,7 +212,7 @@ jobs:
 
       - name: Ensure coverage is good
         if: github.event_name == 'pull_request'
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
@@ -220,7 +229,7 @@ jobs:
 
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
@@ -244,23 +253,14 @@ jobs:
     if: needs.read-config.outputs.separateRaceTests != 'true'
     needs:
       - read-config
-      - ecr-login
     runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
     timeout-minutes: 30
-    container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
     steps:
-      - name: Mask ECR token in logs
-        if: needs.read-config.outputs.testRunner != ''
-        run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
-
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
-
-      - name: Allow git in workspace (required for Go -buildvcs in container)
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -299,25 +299,68 @@ jobs:
                 echo "${source}=${target}" >> "$GITHUB_ENV"
             done
 
+      - name: Configure AWS credentials for ECR pull
+        if: needs.read-config.outputs.testRunner != ''
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          audience: sts.amazonaws.com
+          role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::067421297632:role/paddle-tfecr-gha-ecr-${{ github.event.repository.name }}
+          aws-region: us-east-1
+          role-duration-seconds: 900
+          retry-max-attempts: 3
+
+      - name: Log in to Amazon ECR
+        if: needs.read-config.outputs.testRunner != ''
+        uses: aws-actions/amazon-ecr-login@183a1442edf41672e66566b7fc560e297a290896 # v2.1.1
+
       - name: Run tests with coverage and race detector
         timeout-minutes: 20
         env:
           ENVIRONMENT: ci
           CGO_ENABLED: 1
           GORACE: atexit_sleep_ms=50
+          TEST_IMAGE: ${{ needs.read-config.outputs.testRunner }}
         run: |
-          gotestsum \
-            --format testname \
-            --jsonfile test-report.json \
-            -- \
-            -v \
-            -coverprofile=cover.out \
-            -covermode=atomic \
-            -coverpkg ./... \
-            -race \
-            -buildvcs=true \
-            -shuffle=on \
+          set -euo pipefail
+          gotestsum_args=(
+            --format testname
+            --jsonfile test-report.json
+            --
+            -v
+            -coverprofile=cover.out
+            -covermode=atomic
+            -coverpkg ./...
+            -race
+            -buildvcs=true
+            -shuffle=on
             ./...
+          )
+
+          if [ -z "$TEST_IMAGE" ]; then
+            gotestsum "${gotestsum_args[@]}"
+            exit 0
+          fi
+
+          # Run go test inside the configured testRunner image. Host-side
+          # steps (checkout, setup-go, setup-databases, JS-based reporting)
+          # stay on the host so GHA's JS-Actions-in-Alpine-arm64 restriction
+          # doesn't bite. --network host lets the containerised tests reach
+          # databases setup-databases provisioned on the host. --user matches
+          # the host UID so output files (coverage, CTRF) are readable by
+          # subsequent host steps.
+          docker run --rm \
+            --network host \
+            --user "$(id -u):$(id -g)" \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -v "$(go env GOMODCACHE):/tmp/gomodcache" \
+            -v "$(go env GOCACHE):/tmp/gocache" \
+            -e HOME=/tmp \
+            -e GOMODCACHE=/tmp/gomodcache \
+            -e GOCACHE=/tmp/gocache \
+            -e ENVIRONMENT -e CGO_ENABLED -e GORACE \
+            "$TEST_IMAGE" \
+            gotestsum "${gotestsum_args[@]}"
 
       - name: Snapshot Postgres template cache
         if: always()
@@ -373,7 +416,7 @@ jobs:
 
       - name: Ensure coverage is good
         if: github.event_name == 'pull_request'
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
@@ -390,7 +433,7 @@ jobs:
 
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
@@ -479,26 +522,36 @@ jobs:
           postgres-template-cache-hit: ${{ steps.setup-databases.outputs.postgres-template-cache-hit }}
           postgres-major-version: ${{ steps.setup-databases.outputs.postgres-major-version }}
 
-  automerge_tests:
-    name: Automerge unit tests with and without race detector
+  validate_tests:
+    name: Run tests and validate coverage
     needs:
       - read-config
       - test-combined
       - test
       - race
-    # `test-combined` and (`test` + `race`) are mutually exclusive paths
-    # selected by `separateRaceTests`, so one branch is always skipped.
-    # Without this condition the default `success()` gate skips this job
-    # whenever any need is skipped — meaning the automerge trigger never
-    # fires.
-    if: |-
-      !cancelled() && (
-        needs.test-combined.result == 'success' ||
-        (needs.test.result == 'success' && needs.race.result == 'success')
-      )
+    # Always run so the required status check resolves to the actual outcome
+    # of whichever mutex path ran. A SKIPPED required check is treated as
+    # passing by branch protections, which previously let failing test runs
+    # merge when the named-required job happened to be the skipped one.
+    if: always() && !cancelled()
     runs-on: go-4-core
     timeout-minutes: 10
     steps:
+      - name: Validate test results
+        env:
+          TEST_COMBINED: ${{ needs.test-combined.result }}
+          TEST: ${{ needs.test.result }}
+          RACE: ${{ needs.race.result }}
+        run: |
+          if [[ "$TEST_COMBINED" == "success" ]]; then
+            exit 0
+          fi
+          if [[ "$TEST" == "success" && "$RACE" == "success" ]]; then
+            exit 0
+          fi
+          echo "Tests did not succeed: test-combined=$TEST_COMBINED test=$TEST race=$RACE"
+          exit 1
+
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -514,7 +567,7 @@ jobs:
   otel_cicd_export:
     name: OpenTelemetry Export Trace
     if: always()
-    needs: [read-config, ecr-login, test, test-combined, race, automerge_tests]
+    needs: [read-config, test, test-combined, race, validate_tests]
     runs-on: go-2-core
     timeout-minutes: 5
     permissions:

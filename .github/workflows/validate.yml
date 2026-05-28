@@ -224,7 +224,7 @@ jobs:
         if: |
           github.event_name == 'pull_request' &&
           (steps.scope.conclusion == 'skipped' || steps.scope.outputs.gosum_changed == 'true')
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: govulncheck
           mode: ${{ steps.govulncheck.outputs.result != '' && 'upsert' || 'delete' }}
