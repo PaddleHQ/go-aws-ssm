@@ -6,7 +6,7 @@
 			"package": "golang.org/x/vuln/cmd/govulncheck"
 		},
 		"modernize": {
-			"version": "v0.20.0",
+			"version": "v0.22.0",
 			"package": "golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize"
 		},
 		"modfmt": {
