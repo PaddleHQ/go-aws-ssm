@@ -43,16 +43,14 @@ jobs:
           private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
           cache-suffix: validate
 
-      - name: Install `govulncheck`, `gopls`, `modfmt` and `ghokin`
-        run: |
-          for cmd in govulncheck modernize modfmt ghokin; do
-            command -v "$cmd" >/dev/null || install_all=1
-          done
-          [ -z "${install_all:-}" ] && exit 0
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-          go install golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.20.0
-          go install github.com/abhijit-hota/modfmt@v0.0.0-20260105113844-287023c3d905
-          go install github.com/PaddleHQ/ghokin/v4@1a4a51e4fc32c59c88d7eb7e4835636641a54b0f # v4.1.1
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
+        with:
+          tools: |
+            govulncheck
+            modernize
+            modfmt
+            ghokin
 
       #  --
       # Resolve scope
@@ -197,8 +195,9 @@ jobs:
         if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.feature_files != ''
         run: |
           [ -d "features/" ] || exit 0
+          ghokin_version=$(jq -r '.tools.ghokin.version' tool-versions.json)
           ghokin check features/ || \
-            (echo '::error title=Incorrect feature file formatting::Please run "go run github.com/PaddleHQ/ghokin/v4@1a4a51e4fc32c59c88d7eb7e4835636641a54b0f fmt replace features/" to fix' && exit 1)
+            (echo "::error title=Incorrect feature file formatting::Please run \"go run github.com/PaddleHQ/ghokin/v4@${ghokin_version} fmt replace features/\" to fix" && exit 1)
 
       # --
       # Go Vulncheck
