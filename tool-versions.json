@@ -1,0 +1,21 @@
+{
+	"comment": "Pinned versions of Go CLI tools used by validate.yml. Bumped daily by sync-tool-versions.yml from PaddleHQ/github-actions-custom-images. Synced to consumer repos by paddle-config.",
+	"tools": {
+		"govulncheck": {
+			"version": "v1.1.4",
+			"package": "golang.org/x/vuln/cmd/govulncheck"
+		},
+		"modernize": {
+			"version": "v0.20.0",
+			"package": "golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize"
+		},
+		"modfmt": {
+			"version": "v0.0.0-20260105113844-287023c3d905",
+			"package": "github.com/abhijit-hota/modfmt"
+		},
+		"ghokin": {
+			"version": "v4.1.1",
+			"package": "github.com/PaddleHQ/ghokin/v4"
+		}
+	}
+}
