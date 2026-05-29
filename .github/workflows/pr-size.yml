@@ -36,8 +36,10 @@ jobs:
         id: lines_changed
         env:
           PATTERNS: ${{ steps.generated_paths.outputs.patterns }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          merge_base=$(git merge-base origin/${{ github.event.pull_request.base.ref }} HEAD)
+          base_ref="${BASE_REF#refs/heads/}"
+          merge_base=$(git merge-base "origin/${base_ref}" HEAD)
 
           # Build git pathspec exclusions from the resolved pattern list.
           # `glob` magic is needed for `**` to match across path segments.

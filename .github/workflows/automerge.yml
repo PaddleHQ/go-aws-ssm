@@ -361,12 +361,13 @@ jobs:
             -e '^\.github/pull_request_template\.md$'
             -e '^\.github/release\.yml$'
             -e '^\.github/actionlint\.yaml$'
+            -e '^tool-versions\.json$'
           )
           if [ -n "${CHANGED_FILES}" ] && ! echo "${CHANGED_FILES}" | grep -qvE "${ALLOWED[@]}"; then
             echo "✅ Only safe template files modified (workflows/dependabot) - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           else
-            REASON="Updates to files outside the safe template allow-list (\`.github/actions\`, \`.github/workflows\`, \`.github/dependabot.yml\`, \`.github/pull_request_template.md\`, \`.github/release.yml\`, \`.github/actionlint.yaml\`) — manual review required."
+            REASON="Updates to files outside the safe template allow-list (\`.github/actions\`, \`.github/workflows\`, \`.github/dependabot.yml\`, \`.github/pull_request_template.md\`, \`.github/release.yml\`, \`.github/actionlint.yaml\`, \`tool-versions.json\`) — manual review required."
             echo "⚠️ ${REASON}"
             echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           fi
