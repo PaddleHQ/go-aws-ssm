@@ -81,10 +81,12 @@ jobs:
               curl -L -o "${target}" "${source}"                  # Copy the file
             done
 
-      - name: Install test dependencies
-        run: |
-          go install gotest.tools/gotestsum@v1.13.0
-          go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@v0.0.14
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
+        with:
+          tools: |
+            gotestsum
+            go-ctrf-json-reporter
 
       - name: Setup test databases
         id: setup-databases
@@ -282,10 +284,12 @@ jobs:
               curl -L -o "${target}" "${source}"                  # Copy the file
             done
 
-      - name: Install test dependencies
-        run: |
-          go install gotest.tools/gotestsum@v1.13.0
-          go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@v0.0.14
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
+        with:
+          tools: |
+            gotestsum
+            go-ctrf-json-reporter
 
       - name: Setup test databases
         id: setup-databases
