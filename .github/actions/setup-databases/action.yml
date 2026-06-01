@@ -83,12 +83,14 @@ runs:
       with:
         path: /tmp/pg-template.tar.zst
         key: ${{ runner.os }}-pg${{ steps.pg-detect.outputs.version }}-template-testament${{ steps.pg-cache-key.outputs.testament-version }}-${{ steps.pg-cache-key.outputs.hash }}
+        restore-keys: |
+          ${{ runner.os }}-pg${{ steps.pg-detect.outputs.version }}-template-testament${{ steps.pg-cache-key.outputs.testament-version }}-
 
     - name: Start PostgreSQL
       if: steps.go_testament.outputs.imported == 'true'
       shell: bash
       run: |
-        if [ "${{ steps.pg-cache.outputs.cache-hit }}" = "true" ]; then
+        if [ -f /tmp/pg-template.tar.zst ]; then
           sudo systemctl stop postgresql.service || true
           sudo rm -rf /var/lib/postgresql/${{ steps.pg-detect.outputs.version }}/main
           sudo mkdir -p /var/lib/postgresql/${{ steps.pg-detect.outputs.version }}
