@@ -22,7 +22,7 @@
 			"package": "gotest.tools/gotestsum"
 		},
 		"go-ctrf-json-reporter": {
-			"version": "v0.0.14",
+			"version": "v0.1.0",
 			"package": "github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter"
 		}
 	}
