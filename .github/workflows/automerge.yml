@@ -115,7 +115,7 @@ jobs:
   #
   # `permissions:` is set explicitly to `checks: read` only, overriding the
   # broader workflow-level scope. This narrows the GITHUB_TOKEN that the
-  # third-party `wechuli/allcheckspassed` action receives — so even a
+  # third-party `step-security/allcheckspassed` action receives — so even a
   # compromised version of that action cannot reach `pull-requests: write`.
   wait_for_ready:
     name: Check source and wait for PR to be ready
@@ -148,7 +148,7 @@ jobs:
         if: |-
           steps.check-secret.outputs.can_automerge == 'true' &&
           github.event.inputs.workflow != ''
-        uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
+        uses: step-security/allcheckspassed@c00c70ebb41bb057d9a00f6b97bfbc6f6e4c2f30 # v2.3.0
         id: check-caller
         continue-on-error: true
         with:
@@ -160,7 +160,7 @@ jobs:
         if: |-
           steps.check-secret.outputs.can_automerge == 'true' &&
           steps.check-caller.outcome == 'success'
-        uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
+        uses: step-security/allcheckspassed@c00c70ebb41bb057d9a00f6b97bfbc6f6e4c2f30 # v2.3.0
         id: check-all
         continue-on-error: true
         with:

@@ -32,7 +32,7 @@ concurrency:
   cancel-in-progress: true
 
 # No top-level `permissions:` — every job declares its own minimum scope.
-# This isolates the third-party `wechuli/allcheckspassed` action in its own
+# This isolates the third-party `step-security/allcheckspassed` action in its own
 # job (`wait_for_checks`) where the GITHUB_TOKEN it inherits has only
 # `checks: read`, with no access to `pull-requests: write`.
 permissions: {}
@@ -78,7 +78,7 @@ jobs:
             fi
 
   # --
-  # Wait for upstream checks via the third-party `wechuli/allcheckspassed`
+  # Wait for upstream checks via the third-party `step-security/allcheckspassed`
   # action. Isolated in its own job so its GITHUB_TOKEN is scoped to
   # `checks: read` only — even a compromised version of the action cannot
   # reach the PR-mutation scope held by the downstream `mark_ready` job.
@@ -96,7 +96,7 @@ jobs:
     steps:
       - name: "⏳ Wait for calling workflow to be ready"
         if: github.event.inputs.workflow != ''
-        uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
+        uses: step-security/allcheckspassed@c00c70ebb41bb057d9a00f6b97bfbc6f6e4c2f30 # v2.3.0
         id: check-caller
         with:
           delay: '0'
@@ -107,7 +107,7 @@ jobs:
 
       - name: "⏳ Wait for All Required Checks to Pass"
         if: steps.check-caller.outcome == 'success'
-        uses: wechuli/allcheckspassed@1d00cf0c34c4b0805db8866d8913f22e7125301e # v2.3.0
+        uses: step-security/allcheckspassed@c00c70ebb41bb057d9a00f6b97bfbc6f6e4c2f30 # v2.3.0
         id: check-all
         with:
           delay: '0'
