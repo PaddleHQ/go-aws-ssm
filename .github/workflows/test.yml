@@ -126,13 +126,15 @@ jobs:
           gotestsum_args=(
             --format testname
             --jsonfile test-report.json
+            --rerun-fails
+            --rerun-fails-abort-on-data-race
+            --packages=./...
             --
             -coverprofile=cover.out
             -covermode=atomic
             -coverpkg ./...
             -buildvcs=true
             -shuffle=on
-            ./...
           )
 
           if [ -z "$TEST_IMAGE" ]; then
@@ -330,6 +332,9 @@ jobs:
           gotestsum_args=(
             --format testname
             --jsonfile test-report.json
+            --rerun-fails
+            --rerun-fails-abort-on-data-race
+            --packages=./...
             --
             -v
             -coverprofile=cover.out
@@ -338,7 +343,6 @@ jobs:
             -race
             -buildvcs=true
             -shuffle=on
-            ./...
           )
 
           if [ -z "$TEST_IMAGE" ]; then

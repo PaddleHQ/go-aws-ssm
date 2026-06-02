@@ -1,0 +1,139 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Check API compatibility
+
+# Runs only on pull_request: gorelease needs the PR's labels (to skip
+# release:major) and a base release tag, neither of which exist in merge_group.
+# Kept in its own workflow so label changes refresh the comment without
+# re-running the full validate suite.
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+
+env:
+  # Required to enable support for synctest.Run
+  # This will be removed once we update to go 1.25
+  GOEXPERIMENT: synctest
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gorelease:
+    name: Check API compatibility
+    runs-on: go-4-core
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0 # fetch all history + tags to resolve the base version
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        id: setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: gorelease
+
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
+        with:
+          tools: |
+            gorelease
+
+      # --
+      # API compatibility (gorelease)
+      #
+      # Detects incompatible Go API changes vs the latest release tag for this
+      # module's major version. Skipped for release:major PRs (author is
+      # knowingly breaking the API). Posts a CAUTION comment; does not fail the
+      # build.
+
+      - name: Run gorelease
+        id: gorelease
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'release:major') }}
+        shell: bash {0}
+        env:
+          GONOSUMDB: "github.com/PaddleHQ/*"
+          GOPRIVATE: "github.com/PaddleHQ/*"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # gorelease fetches the base version (a prior tag of THIS repo) via git
+          # over HTTPS. Authenticate with the repo-scoped GITHUB_TOKEN through git's
+          # credential cache — the same helper mechanism setup-go uses — rather than
+          # rewriting URLs. Cleared by "Clear git credentials" below.
+          git config --global credential.https://github.com.helper cache
+          git credential approve <<EOF
+          protocol=https
+          host=github.com
+          username=x-access-token
+          password=${GH_TOKEN}
+          EOF
+
+          MODULE_PATH=$(go list -m)
+          MAJOR=$(echo "$MODULE_PATH" | grep -oE '/v[0-9]+$' | grep -oE '[0-9]+' || echo "1")
+          MAJOR_PREFIX="v${MAJOR}"
+
+          BASE_TAG=$(git tag --list "${MAJOR_PREFIX}.*" --sort=-version:refname \
+            | grep -E "^${MAJOR_PREFIX}\.[0-9]+\.[0-9]+$" \
+            | head -1)
+
+          if [ -z "$BASE_TAG" ]; then
+            echo "No prior release tag for ${MAJOR_PREFIX} — skipping"
+            exit 0
+          fi
+
+          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
+
+          result=$(gorelease -base="${BASE_TAG}" 2>&1)
+          exit_code=$?
+
+          if [ ${exit_code} -ne 0 ]; then
+            {
+              echo 'result<<EOF'
+              echo "${result}" | awk '{print "> "$0}'
+              echo EOF
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      # Drop the GITHUB_TOKEN credential seeded for the gorelease fetch above.
+      # Mirrors setup-go's own teardown; always runs so it never outlives the job.
+      - name: Clear git credentials
+        if: always()
+        shell: bash
+        run: git credential-cache exit || true
+
+      - name: Delete previous gorelease comment
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: gorelease
+          mode: delete
+
+      - name: Comment PR with API breaking changes
+        if: ${{ steps.gorelease.outputs.result != '' }}
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: gorelease
+          mode: upsert
+          message: |
+            > [!CAUTION]
+            > ## :rotating_light: Breaking API changes detected
+            > `gorelease` found incompatible changes vs `${{ steps.gorelease.outputs.base_tag }}`. If intentional, change the semver label to `release:major`.
+            > ```
+            ${{ steps.gorelease.outputs.result }}
+            > ```
