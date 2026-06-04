@@ -383,6 +383,61 @@ jobs:
     outputs:
       can_automerge: ${{ steps.check-files.outputs.can_automerge }}
 
+  check_coding_standards_changes:
+    name: "[Automerge/Check] 📋 Check Coding Standards Changes"
+    needs:
+      - pr_info
+      - wait_for_ready
+    runs-on: go-2-core
+    timeout-minutes: 5
+
+    if: |-
+      needs.wait_for_ready.outputs.can_automerge == 'true' &&
+      needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
+      contains(needs.pr_info.outputs.labels, 'origin:coding-standards')
+
+    steps:
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.pr_info.outputs.head_ref }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: "🔍 Analyze Coding Standards Changes"
+        id: check-files
+        env:
+          CHANGED_FILES: ${{ needs.pr_info.outputs.changed_files }}
+        run: |
+          echo "🔍 Checking which files were modified by coding-standards sync..."
+          # Coding-standards sync is allowed to touch only linter config files.
+          # This gate is isolated from other sync sources to prevent cross-contamination.
+          ALLOWED=(
+            -e '^\.golangci\.yml$'
+            -e '^\.golangci\.experimental\.yml$'
+            -e '^\.golangci\.v2\.yml$'
+            -e '^\.golangci\.v2\.experimental\.yml$'
+          )
+          if [ -n "${CHANGED_FILES}" ] && ! echo "${CHANGED_FILES}" | grep -qvE "${ALLOWED[@]}"; then
+            echo "✅ Only safe coding-standards files modified (.golangci.yml variants) - automerge enabled"
+            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+          else
+            REASON="Coding-standards sync should only modify linter config files (\`.golangci.yml\`, \`.golangci.experimental.yml\`, and their v2 variants) — other changes require manual review."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Check Coding Standards Changes"
+          reason: ${{ steps.check-files.outputs.reason }}
+          github_token: ${{ github.token }}
+
+    outputs:
+      can_automerge: ${{ steps.check-files.outputs.can_automerge }}
+
   check_paddle_config_changes:
     name: "[Automerge/Check] ⚙️ Check Paddle Config Changes"
     needs:
@@ -509,6 +564,7 @@ jobs:
       - check_dependabot_go_deps
       - check_dependabot_action_refs
       - check_library_template_changes
+      - check_coding_standards_changes
       - check_paddle_config_changes
       - check_renovate_changes
 
@@ -519,6 +575,7 @@ jobs:
         needs.check_dependabot_go_deps.outputs.can_automerge == 'true' ||
         needs.check_dependabot_action_refs.outputs.can_automerge == 'true' ||
         needs.check_library_template_changes.outputs.can_automerge == 'true' ||
+        needs.check_coding_standards_changes.outputs.can_automerge == 'true' ||
         needs.check_paddle_config_changes.outputs.can_automerge == 'true' ||
         needs.check_renovate_changes.outputs.can_automerge == 'true'
       )
@@ -570,7 +627,7 @@ jobs:
   otel_cicd_export:
     name: OpenTelemetry Export Trace
     if: always()
-    needs: [pr_info, wait_for_ready, check_dependabot_go_deps, check_dependabot_action_refs, check_library_template_changes, check_paddle_config_changes, check_renovate_changes, automerge]
+    needs: [pr_info, wait_for_ready, check_dependabot_go_deps, check_dependabot_action_refs, check_library_template_changes, check_coding_standards_changes, check_paddle_config_changes, check_renovate_changes, automerge]
     runs-on: go-2-core
     timeout-minutes: 5
     permissions:
