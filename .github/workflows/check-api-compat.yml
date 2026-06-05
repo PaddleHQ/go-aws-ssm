@@ -100,14 +100,36 @@ jobs:
 
           echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
 
-          result=$(gorelease -base="${BASE_TAG}" 2>&1)
-          exit_code=$?
+          # gorelease refuses to run against a dirty work tree, and the
+          # setup/install steps above can leave go.mod/go.sum modified. Restore
+          # tracked files to the committed PR head so gorelease evaluates exactly
+          # what's committed.
+          git checkout -- .
 
-          if [ ${exit_code} -ne 0 ]; then
+          # Capture the API report (stdout) separately from operational errors
+          # (stderr, prefixed "gorelease:"). gorelease exits non-zero BOTH when it
+          # finds incompatible changes AND when it can't run at all, so the exit
+          # code alone can't distinguish a real breaking change from a tool
+          # failure — splitting the streams can.
+          err_file="${RUNNER_TEMP:-/tmp}/gorelease.err"
+          report=$(gorelease -base="${BASE_TAG}" 2>"${err_file}")
+          exit_code=$?
+          tool_err=$(cat "${err_file}")
+
+          if [ "${exit_code}" -eq 0 ]; then
+            echo "API is compatible with ${BASE_TAG}"
+          elif [ -n "${tool_err}" ]; then
+            # gorelease errored before producing a report — fail loudly rather
+            # than mislabel a tool failure as a breaking API change.
+            echo "::error::gorelease could not run against ${BASE_TAG}: ${tool_err}"
+            exit 1
+          else
+            # Non-zero exit with empty stderr → genuine incompatible API changes
+            # reported on stdout.
             {
-              echo 'result<<EOF'
-              echo "${result}" | awk '{print "> "$0}'
-              echo EOF
+              echo 'result<<GORELEASE_EOF'
+              echo "${report}" | awk '{print "> "$0}'
+              echo GORELEASE_EOF
             } >> "$GITHUB_OUTPUT"
           fi
 
