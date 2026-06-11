@@ -49,6 +49,12 @@ jobs:
           private: ${{ github.event.repository.private }}
           private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
           cache-suffix: gorelease
+          # Keep the GitHub App token in git's credential cache so the gorelease
+          # step can fetch the base version's transitive private deps (e.g.
+          # go-rest). The repo-scoped GITHUB_TOKEN can't reach other PaddleHQ
+          # repos; the App token is owner-scoped. Dropped by "Clear git
+          # credentials" below.
+          clear-token: 'false'
 
       - name: Install Go tools
         uses: ./.github/actions/install-go-tools
@@ -71,20 +77,13 @@ jobs:
         env:
           GONOSUMDB: "github.com/PaddleHQ/*"
           GOPRIVATE: "github.com/PaddleHQ/*"
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # gorelease fetches the base version (a prior tag of THIS repo) via git
-          # over HTTPS. Authenticate with the repo-scoped GITHUB_TOKEN through git's
-          # credential cache — the same helper mechanism setup-go uses — rather than
-          # rewriting URLs. Cleared by "Clear git credentials" below.
-          git config --global credential.https://github.com.helper cache
-          git credential approve <<EOF
-          protocol=https
-          host=github.com
-          username=x-access-token
-          password=${GH_TOKEN}
-          EOF
-
+          # gorelease fetches the base version and resolves its full module
+          # graph — including transitive private deps (e.g. go-rest) — via git
+          # over HTTPS. It relies on the GitHub App token setup-go left in git's
+          # credential cache (clear-token: 'false'); that token is owner-scoped,
+          # so it can reach those cross-repo private deps. Cleared by "Clear git
+          # credentials" below.
           MODULE_PATH=$(go list -m)
           MAJOR=$(echo "$MODULE_PATH" | grep -oE '/v[0-9]+$' | grep -oE '[0-9]+' || echo "1")
           MAJOR_PREFIX="v${MAJOR}"
@@ -133,8 +132,8 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-      # Drop the GITHUB_TOKEN credential seeded for the gorelease fetch above.
-      # Mirrors setup-go's own teardown; always runs so it never outlives the job.
+      # Drop the App-token credential setup-go left cached (clear-token:
+      # 'false'). Always runs so the token never outlives the job.
       - name: Clear git credentials
         if: always()
         shell: bash
