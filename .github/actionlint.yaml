@@ -3,6 +3,7 @@ self-hosted-runner:
     - go-2-core
     - go-2-core-latest
     - go-4-core
+    - go-4-core-amd64
     - go-4-core-latest
     - go-8-core
     - go-8-core-latest
