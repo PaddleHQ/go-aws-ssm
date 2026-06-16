@@ -18,7 +18,7 @@
 			"package": "github.com/PaddleHQ/ghokin/v4"
 		},
 		"gorelease": {
-			"version": "v0.0.0-20260529124908-c761662dc8c9",
+			"version": "v0.0.0-20260603202125-055de637280b",
 			"package": "golang.org/x/exp/cmd/gorelease"
 		},
 		"gotestsum": {
