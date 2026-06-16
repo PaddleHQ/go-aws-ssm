@@ -1,0 +1,168 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+# Supply-chain review for PRs that bump third-party (non-PaddleHQ) Go deps,
+# via the shared PaddleHQ/supply-chain-action. This file owns only the
+# repo-specific bits: the triage policy (which PRs to review) and the OTel
+# export of the action's usage metrics. The review itself lives in the action.
+#
+# Orthogonal to govulncheck (CVE gate, in validate.yml) and
+# check-action-security.yml (GH-Actions bumps) - this flags what scanners
+# can't: maintainer changes, init() side effects, suspicious imports, intent
+# mismatch. See the action's README for the full pipeline.
+
+name: Claude Dependency Security Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+# Queue concurrent runs per PR so a new push waits for any in-flight review
+# instead of cancelling it.
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    name: Triage dependency changes
+    runs-on: go-2-core
+    timeout-minutes: 5
+    if: ${{ !github.event.pull_request.draft && vars.SUPPLY_CHAIN_REVIEW_ENABLED != 'false' }}
+
+    steps:
+      - name: Verify ANTHROPIC_API_KEY available
+        id: check-secret
+        env:
+          # Intermediate env var: keeps the secret out of the shell source
+          # text the workflow engine would otherwise inline (per GitHub's
+          # security-hardening guide).
+          ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_KEY}" ]; then
+            echo "::notice::No ANTHROPIC_API_KEY org secret - dependency review disabled"
+            echo "should_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_review=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR
+        if: steps.check-secret.outputs.should_review == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve merge base
+        if: steps.check-secret.outputs.should_review == 'true'
+        id: merge-base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          MERGE_BASE=$(git merge-base "origin/${BASE_REF}" HEAD)
+          echo "merge_base=${MERGE_BASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Classify the dependency diff
+        if: steps.check-secret.outputs.should_review == 'true'
+        id: classify
+        env:
+          MERGE_BASE: ${{ steps.merge-base.outputs.merge_base }}
+          PR_AUTHOR:  ${{ github.event.pull_request.user.login }}
+        run: |
+          # Two booleans (0/1) off the go.mod diff. awk not grep: BSD grep
+          # mishandles mixed -/+ char classes and skips alternating matches.
+          diff_gomod() { git diff "${MERGE_BASE}" HEAD -- go.mod; }
+          has() { diff_gomod | awk "$1" | grep -q . && echo 1 || echo 0; }
+          PADDLEHQ=$(has '/^[+-][^+-]/ && /github\.com\/PaddleHQ\//')
+          THIRD_PARTY=$(has '/^[+-][^+-]/ && /[a-zA-Z0-9._~\/-]+\.[a-zA-Z0-9._~\/-]+ v[0-9]/ && !/github\.com\/PaddleHQ\//')
+          [ "${PR_AUTHOR}" = "dependabot[bot]" ] && BOT=1 || BOT=0
+
+          # Decision matrix, keyed bot:paddlehq:thirdparty. A dependabot bump
+          # that touches a PaddleHQ module is skipped - its transitive deps
+          # were already reviewed in the upstream PaddleHQ release. Everything
+          # else reviews iff it introduces a third-party require change.
+          case "${BOT}:${PADDLEHQ}:${THIRD_PARTY}" in
+            1:1:*)  decision=skip;   reason="dependabot bump touches a PaddleHQ module (reviewed upstream)" ;;
+            *:*:0)  decision=skip;   reason="no third-party require change" ;;
+            *)      decision=review; reason="third-party require change" ;;
+          esac
+
+          echo "::notice::Triage (bot=${BOT} paddlehq=${PADDLEHQ} third-party=${THIRD_PARTY}) → ${decision}: ${reason}"
+          [ "${decision}" = "review" ] && echo "should_review=true" >> "$GITHUB_OUTPUT" || echo "should_review=false" >> "$GITHUB_OUTPUT"
+
+    outputs:
+      should_review: ${{ steps.check-secret.outputs.should_review == 'true' && steps.classify.outputs.should_review || 'false' }}
+      merge_base:    ${{ steps.merge-base.outputs.merge_base }}
+
+  review:
+    name: Supply-chain review
+    needs: triage
+    if: needs.triage.outputs.should_review == 'true'
+    runs-on: go-2-core
+    timeout-minutes: 20
+    permissions:
+      contents:      read
+      pull-requests: write
+      id-token:      write
+      actions:       read
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Supply-chain review
+        id: review
+        uses: PaddleHQ/supply-chain-action@d2d997c99491ac8e2a0c9825e0e0ee061879fef1 # v0.1.1
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          merge-base:        ${{ needs.triage.outputs.merge_base }}
+
+    # Pass the whole outputs object through as one JSON blob; the otel job
+    # turns it into claude.* attributes generically (no per-field plumbing).
+    outputs:
+      metrics: ${{ toJSON(steps.review.outputs) }}
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    if: always()
+    needs: [triage, review]
+    runs-on: go-2-core
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions:  read
+    steps:
+      # Turn the review job's metrics JSON into `claude.<k>=<v>,...` pairs:
+      # drop empty values (absent on cache hit / skip), hyphens → underscores.
+      - name: Build claude.* resource attributes
+        id: attrs
+        # Only when the review job actually produced metrics. Skipped/failed
+        # review → empty output → nothing to attach (the export step still
+        # runs on always() to capture the workflow trace).
+        if: needs.review.outputs.metrics != ''
+        env:
+          METRICS: ${{ needs.review.outputs.metrics }}
+        run: |
+          PAIRS=$(printf '%s' "${METRICS:-{}}" | jq -r '
+            to_entries
+            | map(select(.value != "" and .value != "null"))
+            | map("claude.\(.key | gsub("-"; "_"))=\(.value)")
+            | join(",")')
+          echo "pairs=${PAIRS}" >> "$GITHUB_OUTPUT"
+          echo "Resource attributes: ${PAIRS}"
+
+      - name: Export workflow trace
+        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        continue-on-error: true
+        with:
+          otlpEndpoint:    grpc://api.honeycomb.io:443/
+          otlpHeaders:     "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
+          githubToken:     ${{ secrets.GITHUB_TOKEN }}
+          extraAttributes: ${{ steps.attrs.outputs.pairs }}
