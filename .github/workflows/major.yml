@@ -17,6 +17,11 @@ permissions:
 jobs:
   major:
     name: Check for major dependency updates
+    # Only run on Dependabot PRs to reduce noise: the major-dependency advisory
+    # comment is most useful on dependency-bump PRs, not on every human PR.
+    # Automerge is still triggered for non-Dependabot PRs via the trigger-automerge
+    # step in the other synced workflows (test, validate, check-build, ...).
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: go-2-core
     timeout-minutes: 10
     steps:
@@ -35,7 +40,10 @@ jobs:
           clear-token: 'false'
 
       - name: Install `gomajor`
-        run: go install github.com/icholy/gomajor@4439c423d4f92ed1214c2a51750b6c34c4c70aa6 # v0.14.0
+        # PaddleHQ fork of gomajor: resolves private github.com/PaddleHQ/* modules
+        # (via `go list`) so their major upgrades are surfaced too. Upstream
+        # icholy/gomajor silently skips private modules.
+        run: go install github.com/PaddleHQ-Forks/gomajor@2f09cbe011caa95b28cdb595bc90806278448b8e # v0.16.0
 
       - name: Run `gomajor`
         id: gomajor
@@ -46,21 +54,51 @@ jobs:
           # see https://paddle.slack.com/archives/CCALA6J23/p1744297603199989
           go_path=$(go env GOPATH)
           export PATH=${PATH}:${go_path}/bin
+          raw="$(gomajor list -major -pre)"
+          deps="$(printf '%s\n' "$raw" | grep -v 'github.com/vektra/mockery/v2' || true)"
           {
             echo 'major_dependencies<<EOF'
-            gomajor list -major -pre | grep -v github.com/vektra/mockery/v2 | awk '{print "> "$0}'
+            printf '%s\n' "$deps" | awk 'NF {print "> "$0}'
             echo EOF
           } >> "$GITHUB_OUTPUT"
+          # Flag when PaddleHQ-owned modules are outstanding: previous major
+          # versions of our own modules are not maintained, so the comment step
+          # escalates the styling (danger vs warning) to prioritise them.
+          if printf '%s\n' "$deps" | grep -q '^github\.com/PaddleHQ/'; then
+            echo 'has_paddle_deps=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'has_paddle_deps=false' >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Remove git token from cache
         shell: bash
         run: git credential-cache exit
 
-      - name: Comment PR to update major dependencies
+      # PaddleHQ modules outstanding -> danger styling: previous major versions of
+      # our own modules are not maintained, so these should be prioritised. This is
+      # advisory only — it does not block automerge.
+      - name: Comment PR — PaddleHQ major dependencies outstanding (danger)
+        if: steps.gomajor.outputs.major_dependencies != '' && steps.gomajor.outputs.has_paddle_deps == 'true'
         uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: major_dependencies
-          mode: ${{ steps.gomajor.outputs.major_dependencies != '' && 'upsert' || 'delete' }}
+          mode: upsert
+          message: |
+            > [!CAUTION]
+            > ## :rotating_light: PaddleHQ major upgrade outstanding
+            >
+            > The upgrades below include **PaddleHQ** modules. We don't maintain previous major versions, so please prioritise these — they won't be picked up automatically.
+            > ```
+            ${{ steps.gomajor.outputs.major_dependencies }}
+            > ```
+
+      # Only third-party modules outstanding -> warning (advisory).
+      - name: Comment PR — third-party major dependencies outstanding (warning)
+        if: steps.gomajor.outputs.major_dependencies != '' && steps.gomajor.outputs.has_paddle_deps != 'true'
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: major_dependencies
+          mode: upsert
           message: |
             > [!IMPORTANT]
             > ## :warning: Major dependencies need updating :warning:
@@ -69,6 +107,14 @@ jobs:
             > ```
             ${{ steps.gomajor.outputs.major_dependencies }}
             > ```
+
+      # Nothing outstanding -> remove any stale comment.
+      - name: Delete major dependencies comment when none outstanding
+        if: steps.gomajor.outputs.major_dependencies == ''
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: major_dependencies
+          mode: delete
 
       - name: Automerge
         uses: ./.github/actions/trigger-automerge
