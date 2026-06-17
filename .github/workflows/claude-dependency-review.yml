@@ -53,7 +53,8 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
+          fetch-depth: 0          # full history for the merge-base
+          filter: blob:none       # but skip file blobs - go.mod is fetched lazily
           persist-credentials: false
 
       - name: Resolve merge base
@@ -114,12 +115,13 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
+          fetch-depth: 0          # full history for the merge-base
+          filter: blob:none       # but skip file blobs - go.mod is fetched lazily
           persist-credentials: false
 
       - name: Supply-chain review
         id: review
-        uses: PaddleHQ/supply-chain-action@d2d997c99491ac8e2a0c9825e0e0ee061879fef1 # v0.1.1
+        uses: PaddleHQ/supply-chain-action@1ff41e8cab34b5be8758db8aa5f7b0b5baa165ee # v0.2.0
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           merge-base:        ${{ needs.triage.outputs.merge_base }}
@@ -150,7 +152,7 @@ jobs:
         env:
           METRICS: ${{ needs.review.outputs.metrics }}
         run: |
-          PAIRS=$(printf '%s' "${METRICS:-{}}" | jq -r '
+          PAIRS=$(printf '%s' "$METRICS" | jq -r '
             to_entries
             | map(select(.value != "" and .value != "null"))
             | map("claude.\(.key | gsub("-"; "_"))=\(.value)")
