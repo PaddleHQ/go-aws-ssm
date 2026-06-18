@@ -111,20 +111,16 @@ jobs:
 
 
   # --
-  # Wait for the PR to be ready for automerge
-  #
-  # `permissions:` is set explicitly to `checks: read` only, overriding the
-  # broader workflow-level scope. This narrows the GITHUB_TOKEN that the
-  # third-party `step-security/allcheckspassed` action receives — so even a
-  # compromised version of that action cannot reach `pull-requests: write`.
+  # Confirm the automerge secret is present before any gate runs. Waiting for
+  # checks is no longer done here — the `automerge` job enables GitHub-native
+  # auto-merge (`gh pr merge --auto`), so the rulesets' required checks, merge
+  # queue and approval gate the actual merge.
   wait_for_ready:
-    name: Check source and wait for PR to be ready
-    runs-on: go-4-core
-    timeout-minutes: 30
+    name: Confirm automerge is enabled
+    runs-on: go-2-core
+    timeout-minutes: 5
     needs:
       - pr_info
-    permissions:
-      checks: read
 
     if: |-
       needs.pr_info.outputs.draft == 'false' && (
@@ -144,42 +140,8 @@ jobs:
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: "🔄 Wait for calling workflow to be ready"
-        if: |-
-          steps.check-secret.outputs.can_automerge == 'true' &&
-          github.event.inputs.workflow != ''
-        uses: step-security/allcheckspassed@c00c70ebb41bb057d9a00f6b97bfbc6f6e4c2f30 # v2.3.0
-        id: check-caller
-        continue-on-error: true
-        with:
-          delay: '0'
-          poll: true
-          checks_include: ${{ github.event.inputs.workflow }}
-
-      - name: "⏳ Wait for All Required Checks to Pass"
-        if: |-
-          steps.check-secret.outputs.can_automerge == 'true' &&
-          steps.check-caller.outcome == 'success'
-        uses: step-security/allcheckspassed@c00c70ebb41bb057d9a00f6b97bfbc6f6e4c2f30 # v2.3.0
-        id: check-all
-        continue-on-error: true
-        with:
-          delay: '0'
-          poll: false
-          checks_exclude: (\[Automerge\/.*\]|StepSecurity).*
-
-      - name: "✅ Confirm Automerge Eligibility"
-        id: check-failure
-        if: |-
-          steps.check-secret.outputs.can_automerge == 'true' &&
-          steps.check-caller.outcome == 'success' &&
-          steps.check-all.outcome == 'success'
-        run: |
-          echo "✅ All checks passed - automerge enabled"
-          echo "can_automerge=true" >> "$GITHUB_OUTPUT"
-
     outputs:
-      can_automerge: ${{ steps.check-secret.outputs.can_automerge && steps.check-failure.outputs.can_automerge }}
+      can_automerge: ${{ steps.check-secret.outputs.can_automerge }}
 
   # --
   # Check the source and the changes of the PR
@@ -611,18 +573,10 @@ jobs:
         if: steps.build_config.outputs['mergeBotEnabled'] == 'true'
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-        run: |
-          echo "🔀 Attempting direct merge..."
-          if MERGE_OUTPUT=$(gh pr merge --admin --squash "${{ github.event.inputs.pr_number }}" 2>&1); then
-            echo "✅ PR merged successfully"
-          elif echo "$MERGE_OUTPUT" | grep -q "merge queue"; then
-            echo "🚂 Merge queue required, adding PR to queue..."
-            gh pr merge --squash "${{ github.event.inputs.pr_number }}"
-          else
-            echo "❌ Merge failed:"
-            echo "$MERGE_OUTPUT"
-            exit 1
-          fi
+        # Enable GitHub-native auto-merge. The PR merges once the rulesets are
+        # satisfied (required checks green, approval present, merge queue), so
+        # this returns immediately rather than holding a runner until checks pass.
+        run: gh pr merge --auto --squash "${{ github.event.inputs.pr_number }}"
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
