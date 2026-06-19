@@ -47,5 +47,10 @@ runs:
           pgrep -u postgres >/dev/null 2>&1 || break
           sleep 1
         done
+        # On a restore-keys (prefix) cache match, setup-databases restored the stale tar to this
+        # path yet reports cache-hit=false, so this step runs. The restored file is owned by the
+        # runner user under sticky /tmp, so `tar -cf` over it fails ("Cannot open: Permission
+        # denied"). Remove it first so tar creates the refreshed snapshot cleanly.
+        sudo rm -f /tmp/pg-template.tar.zst || echo ":warn: failed to delete"
         sudo tar --zstd -cf /tmp/pg-template.tar.zst -C /var/lib/postgresql/${{ inputs.postgres-major-version }} main
         echo "Snapshot size: $(du -sh /tmp/pg-template.tar.zst | cut -f1)"
