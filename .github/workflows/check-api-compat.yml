@@ -65,10 +65,17 @@ jobs:
       # --
       # API compatibility (gorelease)
       #
-      # Detects incompatible Go API changes vs the latest release tag for this
-      # module's major version. Skipped for release:major PRs (author is
-      # knowingly breaking the API). Posts a CAUTION comment; does not fail the
-      # build.
+      # Checks whether the PR's release label is big enough for the API changes
+      # vs the latest release tag for this module's major version. Skipped for
+      # release:major PRs (author is knowingly breaking the API). Posts a
+      # comment; does not fail the build.
+      #
+      # We run gorelease with -version set to the version the label implies and
+      # key off gorelease's own verdict line, NOT its exit code: gorelease exits
+      # non-zero for benign diagnostics too (e.g. retracted transitive deps), so
+      # the exit code alone misreads a compatible release as a breaking change.
+      # The verdict also encodes gorelease's full semver policy (v0 has no
+      # guarantees, pre-releases, /vN path rules) so we don't re-derive it here.
 
       - name: Run gorelease
         id: gorelease
@@ -77,6 +84,7 @@ jobs:
         env:
           GONOSUMDB: "github.com/PaddleHQ/*"
           GOPRIVATE: "github.com/PaddleHQ/*"
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           # gorelease fetches the base version and resolves its full module
           # graph — including transitive private deps (e.g. go-rest) — via git
@@ -99,6 +107,29 @@ jobs:
 
           echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
 
+          # The base tag is a clean vMAJOR.MINOR.PATCH (filtered above). Compute
+          # the version the PR's release label implies so gorelease can judge
+          # whether that bump is sufficient (release:major is excluded by the
+          # step `if`).
+          base_semver="${BASE_TAG#v}"
+          base_major="${base_semver%%.*}"
+          base_rest="${base_semver#*.}"
+          base_minor="${base_rest%%.*}"
+          base_patch="${base_rest##*.}"
+
+          case ",${PR_LABELS}," in
+            *,release:patch,*)
+              # PR claims patch-only: test a patch bump so we also catch
+              # compatible additions that actually require a minor bump.
+              PROPOSED="v${base_major}.${base_minor}.$((base_patch + 1))"
+              ;;
+            *)
+              # release:minor, or no release label yet: a minor bump is valid for
+              # any compatible change, so this flags only incompatible changes.
+              PROPOSED="v${base_major}.$((base_minor + 1)).0"
+              ;;
+          esac
+
           # gorelease refuses to run against a dirty work tree, and the
           # setup/install steps above can leave go.mod/go.sum modified. Restore
           # tracked files to the committed PR head so gorelease evaluates exactly
@@ -106,30 +137,40 @@ jobs:
           git checkout -- .
 
           # Capture the API report (stdout) separately from operational errors
-          # (stderr, prefixed "gorelease:"). gorelease exits non-zero BOTH when it
-          # finds incompatible changes AND when it can't run at all, so the exit
-          # code alone can't distinguish a real breaking change from a tool
-          # failure — splitting the streams can.
+          # (stderr, prefixed "gorelease:"). Operational failures print to
+          # stderr; the API report and version verdict go to stdout.
           err_file="${RUNNER_TEMP:-/tmp}/gorelease.err"
-          report=$(gorelease -base="${BASE_TAG}" 2>"${err_file}")
-          exit_code=$?
+          report=$(gorelease -base="${BASE_TAG}" -version="${PROPOSED}" 2>"${err_file}")
           tool_err=$(cat "${err_file}")
 
-          if [ "${exit_code}" -eq 0 ]; then
-            echo "API is compatible with ${BASE_TAG}"
-          elif [ -n "${tool_err}" ]; then
-            # gorelease errored before producing a report — fail loudly rather
-            # than mislabel a tool failure as a breaking API change.
-            echo "::error::gorelease could not run against ${BASE_TAG}: ${tool_err}"
-            exit 1
-          else
-            # Non-zero exit with empty stderr → genuine incompatible API changes
-            # reported on stdout.
+          # Emit a PR comment whose body is $1 (markdown header lines) followed
+          # by the gorelease report in a quoted code block.
+          emit_comment() {
             {
               echo 'result<<GORELEASE_EOF'
+              printf '%s\n' "$1"
+              echo '> ```'
               echo "${report}" | awk '{print "> "$0}'
+              echo '> ```'
               echo GORELEASE_EOF
             } >> "$GITHUB_OUTPUT"
+          }
+
+          if [ -n "${tool_err}" ]; then
+            # gorelease errored before producing a report — fail loudly rather
+            # than mislabel a tool failure as an API problem.
+            echo "::error::gorelease could not run against ${BASE_TAG}: ${tool_err}"
+            exit 1
+          elif printf '%s' "${report}" | grep -qF 'There are incompatible changes.'; then
+            emit_comment "> [!CAUTION]
+          > ## :rotating_light: Breaking API changes detected
+          > \`gorelease\` found incompatible changes vs \`${BASE_TAG}\`. If intentional, change the semver label to \`release:major\`."
+          elif printf '%s' "${report}" | grep -qF 'the minor version is not incremented'; then
+            emit_comment "> [!WARNING]
+          > ## :warning: Release label too low
+          > \`gorelease\` found compatible API additions vs \`${BASE_TAG}\`, but this PR is not labelled \`release:minor\`. Change the semver label to \`release:minor\`."
+          else
+            echo "Release label is sufficient for the API changes vs ${BASE_TAG}"
           fi
 
       # Drop the App-token credential setup-go left cached (clear-token:
@@ -145,16 +186,10 @@ jobs:
           comment-tag: gorelease
           mode: delete
 
-      - name: Comment PR with API breaking changes
+      - name: Comment PR with release-label issue
         if: ${{ steps.gorelease.outputs.result != '' }}
         uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: gorelease
           mode: upsert
-          message: |
-            > [!CAUTION]
-            > ## :rotating_light: Breaking API changes detected
-            > `gorelease` found incompatible changes vs `${{ steps.gorelease.outputs.base_tag }}`. If intentional, change the semver label to `release:major`.
-            > ```
-            ${{ steps.gorelease.outputs.result }}
-            > ```
+          message: ${{ steps.gorelease.outputs.result }}

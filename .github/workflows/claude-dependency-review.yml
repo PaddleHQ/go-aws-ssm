@@ -50,7 +50,7 @@ jobs:
 
       - name: Checkout PR
         if: steps.check-secret.outputs.should_review == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0          # full history for the merge-base
@@ -72,10 +72,18 @@ jobs:
         env:
           MERGE_BASE: ${{ steps.merge-base.outputs.merge_base }}
           PR_AUTHOR:  ${{ github.event.pull_request.user.login }}
+          REPOSITORY: ${{ github.repository }}
+          GH_TOKEN:   ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Base go.mod via the API: under the blob:none checkout the
+          # merge-base blob isn't local and a post-checkout lazy fetch is
+          # unauthenticated. HEAD's go.mod is the working-tree copy.
+          gh api "repos/${REPOSITORY}/contents/go.mod?ref=${MERGE_BASE}" --jq '.content' \
+            | base64 -d > "${RUNNER_TEMP}/base.go.mod"
+
           # Two booleans (0/1) off the go.mod diff. awk not grep: BSD grep
           # mishandles mixed -/+ char classes and skips alternating matches.
-          diff_gomod() { git diff "${MERGE_BASE}" HEAD -- go.mod; }
+          diff_gomod() { diff -u "${RUNNER_TEMP}/base.go.mod" go.mod || true; }
           has() { diff_gomod | awk "$1" | grep -q . && echo 1 || echo 0; }
           PADDLEHQ=$(has '/^[+-][^+-]/ && /github\.com\/PaddleHQ\//')
           THIRD_PARTY=$(has '/^[+-][^+-]/ && /[a-zA-Z0-9._~\/-]+\.[a-zA-Z0-9._~\/-]+ v[0-9]/ && !/github\.com\/PaddleHQ\//')
@@ -112,7 +120,7 @@ jobs:
 
     steps:
       - name: Checkout PR
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0          # full history for the merge-base
@@ -121,7 +129,7 @@ jobs:
 
       - name: Supply-chain review
         id: review
-        uses: PaddleHQ/supply-chain-action@1ff41e8cab34b5be8758db8aa5f7b0b5baa165ee # v0.2.0
+        uses: PaddleHQ/supply-chain-action@6958562a3405122572e41c8da1ba13b7f0fd3048 # v0.2.1
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           merge-base:        ${{ needs.triage.outputs.merge_base }}
