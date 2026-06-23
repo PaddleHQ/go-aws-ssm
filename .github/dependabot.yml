@@ -22,7 +22,7 @@ updates:
       otel:
         patterns:
           - "go.opentelemetry.io/otel/*"
-      otelcontrib-do-not-merge:
+      otelcontrib:
         patterns:
           - "go.opentelemetry.io/contrib/*"
 
