@@ -8,7 +8,13 @@ description: |
 
 inputs:
   honeycomb-team:
-    description: Honeycomb API key. Pass `${{ secrets.HONEYCOMB_GHA_SECRET }}` — secrets cannot be read directly inside composite actions.
+    description: "Honeycomb API key. Pass secrets.HONEYCOMB_GHA_SECRET — secrets cannot be read directly inside composite actions."
+    required: true
+  honeycomb-dataset:
+    description: "Honeycomb dataset name. Pass vars.HONEYCOMB_GHA_DATASET — vars cannot be read directly inside composite actions."
+    required: true
+  github-token:
+    description: "GitHub token for API calls. Pass secrets.GITHUB_TOKEN."
     required: true
 
 runs:
@@ -40,6 +46,6 @@ runs:
       continue-on-error: true
       with:
         otlpEndpoint: grpc://api.honeycomb.io:443/
-        otlpHeaders: "x-honeycomb-team=${{ inputs.honeycomb-team }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-        githubToken: ${{ github.token }}
-        customAttributes: '{"workflow.source.hash":"${{ steps.wfhash.outputs.hash }}","runner.image.version":"${{ steps.image.outputs.version }}"}'
+        otlpHeaders: "x-honeycomb-team=${{ inputs.honeycomb-team }},x-honeycomb-dataset=${{ inputs.honeycomb-dataset }}"
+        githubToken: ${{ inputs.github-token }}
+        extraAttributes: '{"workflow.source.hash":"${{ steps.wfhash.outputs.hash }}","runner.image.version":"${{ steps.image.outputs.version }}"}'

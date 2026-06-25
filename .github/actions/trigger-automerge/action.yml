@@ -31,8 +31,7 @@ runs:
         workflow: automerge.yml
         ref: ${{ github.head_ref || github.ref_name }}
         inputs: '{
-            "pr_number": "${{ fromJSON(inputs.event).pull_request.number }}",
-            "workflow": "${{ github.workflow }}"
+            "pr_number": "${{ fromJSON(inputs.event).pull_request.number }}"
           }'
 
     - name: Attempt to auto ready for review
