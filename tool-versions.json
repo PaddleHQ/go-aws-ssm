@@ -14,7 +14,7 @@
 			"package": "github.com/abhijit-hota/modfmt"
 		},
 		"ghokin": {
-			"version": "v4.1.1",
+			"version": "v4.2.0",
 			"package": "github.com/PaddleHQ/ghokin/v4"
 		},
 		"gorelease": {
