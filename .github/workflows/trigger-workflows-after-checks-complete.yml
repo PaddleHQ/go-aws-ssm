@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.check_run.head_sha }}
           persist-credentials: false
@@ -30,8 +30,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          PR_DATA=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.check_run.head_sha }}/pulls" --jq '.[0]')
-          if [ "$PR_DATA" = "null" ]; then
+          # Treat an empty or failed PR lookup the same as "no PR": default to
+          # `{}` so the downstream `event` payload stays valid JSON.
+          PR_DATA=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.check_run.head_sha }}/pulls" --jq '.[0] // empty' || true)
+          if [ -z "$PR_DATA" ] || [ "$PR_DATA" = "null" ]; then
             echo "No pull request found for this commit"
             echo "pr_data={}" >> "$GITHUB_OUTPUT"
           else
@@ -55,10 +57,19 @@ jobs:
       contents: read
       actions: read
     steps:
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        if: always()
+        uses: ./.github/actions/otel-export
         continue-on-error: true
         with:
-          otlpEndpoint: grpc://api.honeycomb.io:443/
-          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

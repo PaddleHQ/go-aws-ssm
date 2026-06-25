@@ -50,7 +50,7 @@ jobs:
 
       - name: Checkout PR
         if: steps.check-secret.outputs.should_review == 'true'
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0          # full history for the merge-base
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: Checkout PR
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0          # full history for the merge-base
@@ -129,7 +129,7 @@ jobs:
 
       - name: Supply-chain review
         id: review
-        uses: PaddleHQ/supply-chain-action@6958562a3405122572e41c8da1ba13b7f0fd3048 # v0.2.1
+        uses: PaddleHQ/supply-chain-action@a9cbe95c25221f6449fcbc2a491bed2de8a7c10f # v0.2.3
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           merge-base:        ${{ needs.triage.outputs.merge_base }}

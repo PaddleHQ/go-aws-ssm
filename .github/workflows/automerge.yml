@@ -14,12 +14,6 @@ on:
         description: 'Number of the pull request'
         required: true
         type: string
-      workflow:
-        # This is used to wait for the workflow to complete before running further actions
-        # It is safe as an input
-        description: 'Name of the workflow that triggered this action'
-        required: false
-        type: string
 
 
 concurrency:
@@ -51,7 +45,7 @@ jobs:
           fi
 
       - name: "📥 Checkout Default Branch"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
@@ -71,7 +65,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: "📥 Checkout PR Code"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ steps.pr-info.outputs.head_ref }}
           persist-credentials: false
@@ -167,7 +161,7 @@ jobs:
 
     steps:
       - name: "📥 Checkout PR Code"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.pr_info.outputs.head_ref }}
           persist-credentials: false
@@ -220,7 +214,7 @@ jobs:
 
     steps:
       - name: "📥 Checkout PR Code"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.pr_info.outputs.head_ref }}
           persist-credentials: false
@@ -303,7 +297,7 @@ jobs:
 
     steps:
       - name: "📥 Checkout PR Code"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.pr_info.outputs.head_ref }}
           persist-credentials: false
@@ -360,7 +354,7 @@ jobs:
 
     steps:
       - name: "📥 Checkout PR Code"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.pr_info.outputs.head_ref }}
           persist-credentials: false
@@ -372,19 +366,20 @@ jobs:
           CHANGED_FILES: ${{ needs.pr_info.outputs.changed_files }}
         run: |
           echo "🔍 Checking which files were modified by coding-standards sync..."
-          # Coding-standards sync is allowed to touch only linter config files.
+          # Coding-standards sync is allowed to touch only linter/editor config files.
           # This gate is isolated from other sync sources to prevent cross-contamination.
           ALLOWED=(
             -e '^\.golangci\.yml$'
             -e '^\.golangci\.experimental\.yml$'
             -e '^\.golangci\.v2\.yml$'
             -e '^\.golangci\.v2\.experimental\.yml$'
+            -e '^\.editorconfig$'
           )
           if [ -n "${CHANGED_FILES}" ] && ! echo "${CHANGED_FILES}" | grep -qvE "${ALLOWED[@]}"; then
-            echo "✅ Only safe coding-standards files modified (.golangci.yml variants) - automerge enabled"
+            echo "✅ Only safe coding-standards files modified (.golangci.yml variants, .editorconfig) - automerge enabled"
             echo "can_automerge=true" >> "$GITHUB_OUTPUT"
           else
-            REASON="Coding-standards sync should only modify linter config files (\`.golangci.yml\`, \`.golangci.experimental.yml\`, and their v2 variants) — other changes require manual review."
+            REASON="Coding-standards sync should only modify linter/editor config files (\`.golangci.yml\`, \`.golangci.experimental.yml\`, their v2 variants, and \`.editorconfig\`) — other changes require manual review."
             echo "⚠️ ${REASON}"
             echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
           fi
@@ -415,7 +410,7 @@ jobs:
 
     steps:
       - name: "📥 Checkout PR Code"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.pr_info.outputs.head_ref }}
           persist-credentials: false
@@ -474,7 +469,7 @@ jobs:
 
     steps:
       - name: "📥 Checkout PR Code"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.pr_info.outputs.head_ref }}
           persist-credentials: false
@@ -544,7 +539,7 @@ jobs:
 
     steps:
       - name: "📥 Checkout PR Code"
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.pr_info.outputs.head_ref }}
           persist-credentials: false
@@ -588,10 +583,19 @@ jobs:
       contents: read
       actions: read
     steps:
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        if: always()
+        uses: ./.github/actions/otel-export
         continue-on-error: true
         with:
-          otlpEndpoint: grpc://api.honeycomb.io:443/
-          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -36,7 +36,7 @@ jobs:
       runsOn: ${{ steps.build_config.outputs.runsOn }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
@@ -56,7 +56,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
@@ -123,6 +123,7 @@ jobs:
           TEST_IMAGE: ${{ needs.read-config.outputs.testRunner }}
         run: |
           set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/covdata"
           gotestsum_args=(
             --format testname
             --jsonfile test-report.json
@@ -130,11 +131,12 @@ jobs:
             --rerun-fails-abort-on-data-race
             --packages=./...
             --
-            -coverprofile=cover.out
+            -cover
             -covermode=atomic
             -coverpkg ./...
             -buildvcs=true
             -shuffle=on
+            -args -test.gocoverdir="${GITHUB_WORKSPACE}/covdata"
           )
 
           if [ -z "$TEST_IMAGE" ]; then
@@ -161,6 +163,19 @@ jobs:
             -e ENVIRONMENT -e CGO_ENABLED \
             "$TEST_IMAGE" \
             gotestsum "${gotestsum_args[@]}"
+
+      - name: Merge coverage profile
+        # gotestsum writes binary coverage into covdata/ (-test.gocoverdir),
+        # which accumulates across any --rerun-fails re-invocations. Merge it
+        # into the cover.out the downstream coverage steps read. An empty dir
+        # (a repo with no tests) yields a mode-only profile.
+        run: |
+          set -euo pipefail
+          if [ -n "$(ls -A "${GITHUB_WORKSPACE}/covdata" 2>/dev/null)" ]; then
+            go tool covdata textfmt -i="${GITHUB_WORKSPACE}/covdata" -o cover.out
+          else
+            echo "mode: atomic" > cover.out
+          fi
 
       - name: Snapshot Postgres template cache
         if: always()
@@ -261,7 +276,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
@@ -329,6 +344,7 @@ jobs:
           TEST_IMAGE: ${{ needs.read-config.outputs.testRunner }}
         run: |
           set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/covdata"
           gotestsum_args=(
             --format testname
             --jsonfile test-report.json
@@ -337,12 +353,13 @@ jobs:
             --packages=./...
             --
             -v
-            -coverprofile=cover.out
+            -cover
             -covermode=atomic
             -coverpkg ./...
             -race
             -buildvcs=true
             -shuffle=on
+            -args -test.gocoverdir="${GITHUB_WORKSPACE}/covdata"
           )
 
           if [ -z "$TEST_IMAGE" ]; then
@@ -369,6 +386,19 @@ jobs:
             -e ENVIRONMENT -e CGO_ENABLED -e GORACE \
             "$TEST_IMAGE" \
             gotestsum "${gotestsum_args[@]}"
+
+      - name: Merge coverage profile
+        # gotestsum writes binary coverage into covdata/ (-test.gocoverdir),
+        # which accumulates across any --rerun-fails re-invocations. Merge it
+        # into the cover.out the downstream coverage steps read. An empty dir
+        # (a repo with no tests) yields a mode-only profile.
+        run: |
+          set -euo pipefail
+          if [ -n "$(ls -A "${GITHUB_WORKSPACE}/covdata" 2>/dev/null)" ]; then
+            go tool covdata textfmt -i="${GITHUB_WORKSPACE}/covdata" -o cover.out
+          else
+            echo "mode: atomic" > cover.out
+          fi
 
       - name: Snapshot Postgres template cache
         if: always()
@@ -469,7 +499,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
@@ -561,7 +591,7 @@ jobs:
           exit 1
 
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
@@ -582,21 +612,19 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Fetch workflow run timestamps
-        id: run_times
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          json=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}")
-          echo "created_at=$(echo "$json" | jq -r '.created_at')" >> "$GITHUB_OUTPUT"
-          echo "run_started_at=$(echo "$json" | jq -r '.run_started_at')" >> "$GITHUB_OUTPUT"
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        if: always()
+        uses: ./.github/actions/otel-export
         continue-on-error: true
         with:
-          otlpEndpoint: grpc://api.honeycomb.io:443/
-          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-          extraAttributes: "github.workflow_run.created_at=${{ steps.run_times.outputs.created_at }},github.workflow_run.run_started_at=${{ steps.run_times.outputs.run_started_at }}"
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
