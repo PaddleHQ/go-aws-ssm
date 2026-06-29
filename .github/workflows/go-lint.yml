@@ -79,7 +79,7 @@ jobs:
 
       - name: golangci-lint
         if: steps.scope.outputs.skip != 'true'
-        uses: step-security/golangci-lint-action@1797facf9ea427614d729a4e9cab0fae1a7852d9 # v9.2.0
+        uses: step-security/golangci-lint-action@ce3368d2f0a15c79206a120861e3f847c8beb466 # v9.2.1
         with:
           version: v2.5.0
           args: --timeout=${{ needs.read-config.outputs.lintTimeout || '5m' }} ${{ steps.scope.outputs.new-from-rev }} ${{ steps.scope.outputs.pkgs }}
@@ -104,7 +104,7 @@ jobs:
     steps:
       - name: Checkout otel-export action
         if: always()
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           sparse-checkout: .github/actions/otel-export
           sparse-checkout-cone-mode: false
