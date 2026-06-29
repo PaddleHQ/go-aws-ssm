@@ -48,4 +48,4 @@ runs:
         otlpEndpoint: grpc://api.honeycomb.io:443/
         otlpHeaders: "x-honeycomb-team=${{ inputs.honeycomb-team }},x-honeycomb-dataset=${{ inputs.honeycomb-dataset }}"
         githubToken: ${{ inputs.github-token }}
-        extraAttributes: '{"workflow.source.hash":"${{ steps.wfhash.outputs.hash }}","runner.image.version":"${{ steps.image.outputs.version }}"}'
+        extraAttributes: "workflow.source.hash=${{ steps.wfhash.outputs.hash }},runner.image.version=${{ steps.image.outputs.version }}"
