@@ -114,8 +114,10 @@ runs:
 
         echo "TESTAMENT_POSTGRES_DSN=host=127.0.0.1 port=5432 user=runner password=hunter2 dbname=testdatabase sslmode=require" >> "$GITHUB_ENV"
 
-        # deprecated, can be removed once all repos have updated to `go-testament` >= v3.3
-        echo "TESTAMENT_POSTGRES_16_DSN=host=127.0.0.1 port=5432 user=runner password=hunter2 dbname=testdatabase sslmode=require" >> "$GITHUB_ENV"
+        # Version-specific DSN keyed on the runner's detected major version: go-testament
+        # resolves TESTAMENT_POSTGRES_<major>_DSN when a test pins an explicit version, and
+        # its PostgresDefault shares a value with the latest version constant.
+        echo "TESTAMENT_POSTGRES_${{ steps.pg-detect.outputs.version }}_DSN=host=127.0.0.1 port=5432 user=runner password=hunter2 dbname=testdatabase sslmode=require" >> "$GITHUB_ENV"
 
     - name: Start MySQL
       if: steps.build_config.outputs['enableMySQL'] == 'true'
