@@ -16,6 +16,10 @@ inputs:
   github-token:
     description: "GitHub token for API calls. Pass secrets.GITHUB_TOKEN."
     required: true
+  extra-attributes:
+    description: "Optional extra OTel resource attributes to append, comma-separated key=value (e.g. service.name=my-workflow-e2e)."
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -48,4 +52,4 @@ runs:
         otlpEndpoint: grpc://api.honeycomb.io:443/
         otlpHeaders: "x-honeycomb-team=${{ inputs.honeycomb-team }},x-honeycomb-dataset=${{ inputs.honeycomb-dataset }}"
         githubToken: ${{ inputs.github-token }}
-        extraAttributes: "workflow.source.hash=${{ steps.wfhash.outputs.hash }},runner.image.version=${{ steps.image.outputs.version }}"
+        extraAttributes: "workflow.source.hash=${{ steps.wfhash.outputs.hash }},runner.image.version=${{ steps.image.outputs.version }}${{ inputs.extra-attributes != '' && format(',{0}', inputs.extra-attributes) || '' }}"
