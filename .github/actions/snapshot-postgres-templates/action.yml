@@ -33,6 +33,8 @@ runs:
     - name: Snapshot
       if: inputs.testament-imported == 'true' && inputs.postgres-template-cache-hit != 'true'
       shell: bash
+      env:
+        PG_MAJOR_VERSION: ${{ inputs.postgres-major-version }}
       run: |
         # Drop per-test instance DBs only; templates and testament's stable base must persist.
         sudo -u postgres psql -tAc \
@@ -52,5 +54,5 @@ runs:
         # runner user under sticky /tmp, so `tar -cf` over it fails ("Cannot open: Permission
         # denied"). Remove it first so tar creates the refreshed snapshot cleanly.
         sudo rm -f /tmp/pg-template.tar.zst || echo ":warn: failed to delete"
-        sudo tar --zstd -cf /tmp/pg-template.tar.zst -C /var/lib/postgresql/${{ inputs.postgres-major-version }} main
+        sudo tar --zstd -cf /tmp/pg-template.tar.zst -C "/var/lib/postgresql/${PG_MAJOR_VERSION}" main
         echo "Snapshot size: $(du -sh /tmp/pg-template.tar.zst | cut -f1)"

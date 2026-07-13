@@ -54,13 +54,13 @@ runs:
   using: "composite"
   steps:
     - name: Extract Go version
-      uses: arnested/go-version-action@8a203e9ff069cbbf4e3b65cb248101cfe307c71c # v1.1.18
+      uses: arnested/go-version-action@6a9d1e0bcc9db5b1693bb7b0ad37491d205f67b6 # v2.1.4
       id: go-version
 
     # For libraries then we use the latest patch version of the minor go version.
     # This should not be used for services.
     - name: Split version code
-      uses: step-security/split-strings@d2212424ae73f4709b3a56faaf96ea42d189102f # v1.0.1
+      uses: step-security/split-strings@3f98629b8f82184c8b6de3199e16f1f68067f7ab # v1.0.2
       id: split
       with:
         string: ${{ steps.go-version.outputs.go-mod-version }}
@@ -68,14 +68,14 @@ runs:
         limit: 2
 
     - name: Set up Go
-      uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+      uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
       with:
         go-version: '${{ steps.split.outputs._0 }}.${{ steps.split.outputs._1 }}'
         check-latest: true
         cache: false
 
     - name: Cache Go modules + build cache
-      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/go/pkg/mod
@@ -87,7 +87,7 @@ runs:
           setup-go-${{ runner.os }}-${{ runner.arch }}-go-
 
     - name: Create a GitHub App Token
-      uses: actions/create-github-app-token@c1a285145b9d317df6ced56c09f525b5c2b6f755 # v1.11.1
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       if: ${{ inputs.private && inputs.private-key != '' }}
       id: app-token
       with:
