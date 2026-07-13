@@ -246,6 +246,29 @@ jobs:
         if: fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100)
         run: exit 1
 
+      # Emitted from the merge-queue run only: that build is the merge commit
+      # about to land on main, so its coverage is main's coverage. One event
+      # per merge to the ci-coverage dataset; graph MAX(coverage.total) by
+      # service.name over time.
+      - name: Push coverage to Honeycomb
+        if: github.event_name == 'merge_group'
+        continue-on-error: true
+        env:
+          HONEYCOMB_TEAM: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          REQUIRED_COVERAGE: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
+          SERVICE_NAME: ${{ github.event.repository.name }}
+          COMMIT_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          curl -sf https://api.honeycomb.io/1/events/ci-coverage \
+            -H "X-Honeycomb-Team: $HONEYCOMB_TEAM" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc \
+              --argjson total "$TOTAL_COVERAGE" \
+              --argjson required "$REQUIRED_COVERAGE" \
+              --arg service "$SERVICE_NAME" \
+              --arg commit "$COMMIT_SHA" \
+              '{"coverage.total": $total, "coverage.required": $required, "service.name": $service, "branch": "main", "commit": $commit}')"
+
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'
         uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
@@ -468,6 +491,29 @@ jobs:
       - name: Fail if coverage is too low
         if: fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100)
         run: exit 1
+
+      # Emitted from the merge-queue run only: that build is the merge commit
+      # about to land on main, so its coverage is main's coverage. One event
+      # per merge to the ci-coverage dataset; graph MAX(coverage.total) by
+      # service.name over time.
+      - name: Push coverage to Honeycomb
+        if: github.event_name == 'merge_group'
+        continue-on-error: true
+        env:
+          HONEYCOMB_TEAM: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          REQUIRED_COVERAGE: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
+          SERVICE_NAME: ${{ github.event.repository.name }}
+          COMMIT_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          curl -sf https://api.honeycomb.io/1/events/ci-coverage \
+            -H "X-Honeycomb-Team: $HONEYCOMB_TEAM" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc \
+              --argjson total "$TOTAL_COVERAGE" \
+              --argjson required "$REQUIRED_COVERAGE" \
+              --arg service "$SERVICE_NAME" \
+              --arg commit "$COMMIT_SHA" \
+              '{"coverage.total": $total, "coverage.required": $required, "service.name": $service, "branch": "main", "commit": $commit}')"
 
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'

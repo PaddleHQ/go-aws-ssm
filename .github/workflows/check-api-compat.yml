@@ -71,11 +71,12 @@ jobs:
       # comment; does not fail the build.
       #
       # We run gorelease with -version set to the version the label implies and
-      # key off gorelease's own verdict line, NOT its exit code: gorelease exits
-      # non-zero for benign diagnostics too (e.g. retracted transitive deps), so
-      # the exit code alone misreads a compatible release as a breaking change.
-      # The verdict also encodes gorelease's full semver policy (v0 has no
-      # guarantees, pre-releases, /vN path rules) so we don't re-derive it here.
+      # parse its report, NOT its exit code: gorelease exits non-zero for benign
+      # diagnostics too (e.g. retracted transitive deps), so the exit code alone
+      # misreads a compatible release as a breaking change. Breaking changes come
+      # from the report's "## incompatible changes" section (populated for every
+      # major, incl. v0 which the summary verdict never flags); the label-too-low
+      # case still keys off gorelease's "minor version is not incremented" line.
 
       - name: Run gorelease
         id: gorelease
@@ -92,16 +93,26 @@ jobs:
           # credential cache (clear-token: 'false'); that token is owner-scoped,
           # so it can reach those cross-repo private deps. Cleared by "Clear git
           # credentials" below.
+          # Derive which vMAJOR tags to consider from the module path. Go omits
+          # the /vN suffix for both v0 and v1 modules, so a bare path could be
+          # either: match v0.* and v1.* and let the tag list decide, or a v0
+          # module (whose only tags are v0.*) finds nothing and is skipped.
           MODULE_PATH=$(go list -m)
-          MAJOR=$(echo "$MODULE_PATH" | grep -oE '/v[0-9]+$' | grep -oE '[0-9]+' || echo "1")
-          MAJOR_PREFIX="v${MAJOR}"
+          MAJOR_SUFFIX=$(echo "$MODULE_PATH" | grep -oE '/v[0-9]+$' | grep -oE '[0-9]+')
+          if [ -n "$MAJOR_SUFFIX" ]; then
+            TAG_RE="^v${MAJOR_SUFFIX}\.[0-9]+\.[0-9]+$"
+            MAJOR_DESC="v${MAJOR_SUFFIX}"
+          else
+            TAG_RE="^v[01]\.[0-9]+\.[0-9]+$"
+            MAJOR_DESC="v0/v1"
+          fi
 
-          BASE_TAG=$(git tag --list "${MAJOR_PREFIX}.*" --sort=-version:refname \
-            | grep -E "^${MAJOR_PREFIX}\.[0-9]+\.[0-9]+$" \
+          BASE_TAG=$(git tag --list --sort=-version:refname \
+            | grep -E "$TAG_RE" \
             | head -1)
 
           if [ -z "$BASE_TAG" ]; then
-            echo "No prior release tag for ${MAJOR_PREFIX} — skipping"
+            echo "No prior release tag for ${MAJOR_DESC} — skipping"
             exit 0
           fi
 
@@ -161,7 +172,20 @@ jobs:
             # than mislabel a tool failure as an API problem.
             echo "::error::gorelease could not run against ${BASE_TAG}: ${tool_err}"
             exit 1
-          elif printf '%s' "${report}" | grep -qF 'There are incompatible changes.'; then
+          elif printf '%s\n' "${report}" | awk '
+              /^## incompatible changes$/ { in_section = 1; next }
+              /^#/                        { in_section = 0 }
+              in_section && NF            { found = 1 }
+              END                         { exit !found }
+            '; then
+            # Detect breaks from the report's "## incompatible changes" section
+            # rather than the summary verdict: gorelease only prints "There are
+            # incompatible changes." for v1+ modules whose proposed bump is too
+            # low. For a v0 module every version is "valid" (semver grants v0 no
+            # API guarantees), so the verdict never flags a removal; the section
+            # does. release:major is excluded above and PROPOSED is only ever a
+            # minor/patch bump, so any incompatible change means the label is
+            # insufficient regardless of major version.
             emit_comment "> [!CAUTION]
           > ## :rotating_light: Breaking API changes detected
           > \`gorelease\` found incompatible changes vs \`${BASE_TAG}\`. If intentional, change the semver label to \`release:major\`."
