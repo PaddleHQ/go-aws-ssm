@@ -6,7 +6,7 @@
 			"package": "golang.org/x/vuln/cmd/govulncheck"
 		},
 		"modernize": {
-			"version": "v0.22.0",
+			"version": "v0.23.0",
 			"package": "golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize"
 		},
 		"modfmt": {
@@ -18,7 +18,7 @@
 			"package": "github.com/PaddleHQ/ghokin/v4"
 		},
 		"gorelease": {
-			"version": "v0.0.0-20260611194520-c48552f49976",
+			"version": "v0.0.0-20260709172345-9ea1abe57597",
 			"package": "golang.org/x/exp/cmd/gorelease"
 		},
 		"gotestsum": {
