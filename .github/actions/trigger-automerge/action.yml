@@ -29,7 +29,13 @@ runs:
       uses: step-security/workflow-dispatch@024752877e2bfa07299ee4204cc5f7e7c14ff930 # v1.3.21
       with:
         workflow: automerge.yml
-        ref: ${{ github.head_ref || github.ref_name }}
+        # Take the head branch from the event payload rather than github.head_ref,
+        # which is only set on pull_request/pull_request_target events. On other
+        # trigger types (e.g. pull_request_review, check_run) head_ref is empty and
+        # github.ref_name resolves to a non-branch ref (like "<pr>/merge") or the wrong
+        # branch, so the dispatch fails. inputs.event.pull_request is guaranteed here by
+        # the guard above and is present on every path that invokes this action.
+        ref: ${{ fromJSON(inputs.event).pull_request.head.ref }}
         inputs: '{
             "pr_number": "${{ fromJSON(inputs.event).pull_request.number }}"
           }'
@@ -41,7 +47,9 @@ runs:
       uses: step-security/workflow-dispatch@024752877e2bfa07299ee4204cc5f7e7c14ff930 # v1.3.21
       with:
         workflow: auto-ready-for-review.yml
-        ref: ${{ github.head_ref || github.ref_name }}
+        # See note above: source the head branch from the event payload so dispatch
+        # works regardless of the triggering event type.
+        ref: ${{ fromJSON(inputs.event).pull_request.head.ref }}
         inputs: '{
             "pr_number": "${{ fromJSON(inputs.event).pull_request.number }}",
             "head_sha": "${{ fromJSON(inputs.event).pull_request.head.sha }}",
