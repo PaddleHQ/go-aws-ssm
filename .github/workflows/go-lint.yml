@@ -24,7 +24,7 @@ permissions:
 jobs:
   read-config:
     name: Read build configuration
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     outputs:
       runsOn: ${{ steps.build_config.outputs.runsOn }}
@@ -96,7 +96,7 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [lint]
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     permissions:
       contents: read

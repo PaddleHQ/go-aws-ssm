@@ -17,7 +17,7 @@ permissions:
 jobs:
   release_on_push:
     name: Create release on push to main branch
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -47,7 +47,7 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [release_on_push]
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     permissions:
       contents: read

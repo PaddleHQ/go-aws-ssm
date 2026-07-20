@@ -22,7 +22,7 @@ env:
 jobs:
   check_blocking_labels:
     name: Check for blocking labels
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     steps:
       - name: Checkout code
@@ -65,7 +65,7 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [check_blocking_labels]
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     permissions:
       contents: read

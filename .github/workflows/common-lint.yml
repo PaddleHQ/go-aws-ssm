@@ -19,7 +19,7 @@ permissions:
 jobs:
   common-lint:
     name: Ensure code passes generic linting rules
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 10
     steps:
       - name: Check out code
@@ -53,7 +53,7 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [common-lint]
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     permissions:
       contents: read

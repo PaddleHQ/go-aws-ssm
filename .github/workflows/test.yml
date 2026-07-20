@@ -28,7 +28,7 @@ permissions:
 jobs:
   read-config:
     name: Read build configuration
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 10
     outputs:
       testRunner: ${{ steps.build_config.outputs.testRunner }}
@@ -102,7 +102,7 @@ jobs:
 
       - name: Configure AWS credentials for ECR pull
         if: needs.read-config.outputs.testRunner != ''
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6.2.0
+        uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b # v6.2.1
         with:
           audience: sts.amazonaws.com
           role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
@@ -192,7 +192,7 @@ jobs:
 
       - name: Publish Test Report
         if: always() && github.event_name == 'pull_request'
-        uses: ctrf-io/github-test-reporter@0f299074936c32ccaab5be5230511f6b2b9080aa # v1.0.28
+        uses: ctrf-io/github-test-reporter@e500b992f936420eb633c91644cf10d4d71df700 # v1.1.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -345,7 +345,7 @@ jobs:
 
       - name: Configure AWS credentials for ECR pull
         if: needs.read-config.outputs.testRunner != ''
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6.2.0
+        uses: aws-actions/configure-aws-credentials@254c19bd240aabef8777f48595e9d2d7b972184b # v6.2.1
         with:
           audience: sts.amazonaws.com
           role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
@@ -438,7 +438,7 @@ jobs:
 
       - name: Publish Test Report
         if: always()
-        uses: ctrf-io/github-test-reporter@0f299074936c32ccaab5be5230511f6b2b9080aa # v1.0.28
+        uses: ctrf-io/github-test-reporter@e500b992f936420eb633c91644cf10d4d71df700 # v1.1.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -618,7 +618,7 @@ jobs:
     # passing by branch protections, which previously let failing test runs
     # merge when the named-required job happened to be the skipped one.
     if: always() && !cancelled()
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 10
     steps:
       - name: Validate test results
@@ -652,7 +652,7 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [read-config, test, test-combined, race, validate_tests]
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     permissions:
       contents: read

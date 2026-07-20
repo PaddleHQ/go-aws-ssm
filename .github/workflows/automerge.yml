@@ -31,7 +31,7 @@ jobs:
 
   pr_info:
     name: "Get PR Info"
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
 
     steps:
@@ -111,7 +111,7 @@ jobs:
   # queue and approval gate the actual merge.
   wait_for_ready:
     name: Confirm automerge is enabled
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     needs:
       - pr_info
@@ -152,7 +152,7 @@ jobs:
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
@@ -205,7 +205,7 @@ jobs:
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
@@ -283,7 +283,7 @@ jobs:
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
@@ -344,7 +344,7 @@ jobs:
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
@@ -400,7 +400,7 @@ jobs:
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
@@ -456,7 +456,7 @@ jobs:
     needs:
       - pr_info
       - wait_for_ready
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
@@ -512,7 +512,7 @@ jobs:
 
   automerge:
     name: "[Automerge/Merge] 🚀 Auto Approve and Merge"
-    runs-on: go-4-core
+    runs-on: generic-2-core
     timeout-minutes: 5
 
     needs:
@@ -577,7 +577,7 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [pr_info, wait_for_ready, check_dependabot_go_deps, check_dependabot_action_refs, check_library_template_changes, check_coding_standards_changes, check_paddle_config_changes, check_renovate_changes, automerge]
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     permissions:
       contents: read

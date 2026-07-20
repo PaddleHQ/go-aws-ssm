@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   check-do-not-edit:
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 10
     name: Check for DO NOT EDIT files
 
@@ -90,7 +90,7 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [check-do-not-edit]
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     permissions:
       contents: read

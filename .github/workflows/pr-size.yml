@@ -18,7 +18,7 @@ permissions:
 jobs:
   pr_size:
     name: Label PRs with size and comment if too large
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 10
     steps:
       - name: Check out code
@@ -108,7 +108,7 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [pr_size]
-    runs-on: go-2-core
+    runs-on: generic-2-core
     timeout-minutes: 5
     permissions:
       contents: read
