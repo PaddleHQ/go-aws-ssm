@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.head_sha }}
           persist-credentials: false
@@ -63,10 +63,11 @@ jobs:
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
         shell: bash
         run: |
             set -euo pipefail
-            pr_json="$(gh pr view ${{ inputs.pr_number }} --json isDraft,labels)"
+            pr_json="$(gh pr view "$PR_NUMBER" --json isDraft,labels)"
             is_draft="$(echo "$pr_json" | jq -r '.isDraft')"
             has_label="$(echo "$pr_json" | jq -r '.labels | map(.name) | index("auto-ready-for-review") | if . == null then "false" else "true" end')"
 
@@ -143,7 +144,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.head_sha }}
           persist-credentials: false
@@ -158,16 +159,18 @@ jobs:
       - name: "🔄 Mark PR ready for review" # github.token doesn't have permission to mark PR ready for review :(
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
         shell: bash
         run: |
-          gh pr ready "${{ inputs.pr_number }}"
+          gh pr ready "$PR_NUMBER"
 
       - name: "🧹 Remove auto label"
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
         shell: bash
         run: |
-          gh pr edit "${{ inputs.pr_number }}" --remove-label "auto-ready-for-review"
+          gh pr edit "$PR_NUMBER" --remove-label "auto-ready-for-review"
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
@@ -181,7 +184,7 @@ jobs:
     steps:
       - name: Checkout otel-export action
         if: always()
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/actions/otel-export
           sparse-checkout-cone-mode: false
