@@ -22,4 +22,7 @@ self-hosted-runner:
     - go-8-core
     - permifrost-2-core
     - permifrost-4-core
+    - terraform-16-core
     - terraform-2-core
+    - terraform-4-core
+    - terraform-8-core
