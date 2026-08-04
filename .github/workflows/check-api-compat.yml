@@ -86,6 +86,7 @@ jobs:
           GONOSUMDB: "github.com/PaddleHQ/*"
           GOPRIVATE: "github.com/PaddleHQ/*"
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GORELEASE_TIMEOUT_SECONDS: "600"
         run: |
           # gorelease fetches the base version and resolves its full module
           # graph — including transitive private deps (e.g. go-rest) — via git
@@ -147,31 +148,64 @@ jobs:
           # what's committed.
           git checkout -- .
 
-          # Capture the API report (stdout) separately from operational errors
-          # (stderr, prefixed "gorelease:"). Operational failures print to
-          # stderr; the API report and version verdict go to stdout.
+          # Bound the run: gorelease resolves the base tag against the unpruned
+          # module graph, which takes minutes on a large tree and burns the whole
+          # job timeout when a version in it is unresolvable. A missing coreutils
+          # is a broken runner rather than a baseline problem, so fail loudly.
+          if ! command -v timeout >/dev/null 2>&1; then
+            echo "::error::timeout(1) not found; cannot bound the gorelease run."
+            exit 1
+          fi
+
+          # The API report goes to stdout, operational errors to stderr.
           err_file="${RUNNER_TEMP:-/tmp}/gorelease.err"
-          report=$(gorelease -base="${BASE_TAG}" -version="${PROPOSED}" 2>"${err_file}")
-          tool_err=$(cat "${err_file}")
+          report=$(timeout "${GORELEASE_TIMEOUT_SECONDS}" gorelease -base="${BASE_TAG}" -version="${PROPOSED}" 2>"${err_file}")
+          gorelease_status=$?
+          tool_err=$(<"${err_file}")
 
           # Emit a PR comment whose body is $1 (markdown header lines) followed
-          # by the gorelease report in a quoted code block.
+          # by $2 — defaulting to the gorelease report — in a quoted code block.
+          # The delimiter is randomised per run: the body embeds gorelease output,
+          # which can carry text from a dependency's go.mod (a retraction
+          # rationale is free-form). A fixed delimiter appearing in that text
+          # would close the heredoc early and let the rest set arbitrary outputs.
           emit_comment() {
+            delim="GORELEASE_EOF_${RANDOM}${RANDOM}${RANDOM}"
             {
-              echo 'result<<GORELEASE_EOF'
+              echo "result<<${delim}"
               printf '%s\n' "$1"
               echo '> ```'
-              echo "${report}" | awk '{print "> "$0}'
+              printf '%s\n' "${2:-${report}}" | awk '{print "> "$0}'
               echo '> ```'
-              echo GORELEASE_EOF
+              echo "${delim}"
             } >> "$GITHUB_OUTPUT"
           }
 
-          if [ -n "${tool_err}" ]; then
-            # gorelease errored before producing a report — fail loudly rather
-            # than mislabel a tool failure as an API problem.
-            echo "::error::gorelease could not run against ${BASE_TAG}: ${tool_err}"
-            exit 1
+          # A report with no '#' section means gorelease died before judging the
+          # API. Not keyed off stderr (a valid report can carry harmless chatter)
+          # nor the exit status (non-zero for benign diagnostics like retractions).
+          if ! printf '%s\n' "${report}" | grep -q '^#'; then
+            if [ "${gorelease_status}" -eq 124 ]; then
+              detail="gorelease exceeded ${GORELEASE_TIMEOUT_SECONDS}s against ${BASE_TAG} and was terminated."
+            else
+              detail="gorelease exited ${gorelease_status} against ${BASE_TAG} without producing a report."
+            fi
+
+            # An unresolvable baseline is not evidence of an API break, so warn
+            # instead of failing. Comment too: the delete step below is
+            # unconditional, so a skip would otherwise erase an earlier warning.
+            # stop-commands fences the stderr dump: it can contain text from a
+            # dependency's go.mod, and a '::' line would otherwise be run as a
+            # workflow command.
+            stop_token="gorelease-stderr-${RANDOM}${RANDOM}${RANDOM}"
+            echo "::stop-commands::${stop_token}"
+            printf '%s\n' "${detail}" "${tool_err}"
+            echo "::${stop_token}::"
+            echo "::warning::Skipped: ${detail} See this step's log for the full error."
+            emit_comment "> [!NOTE]
+          > ## :warning: API compatibility was not checked
+          > \`gorelease\` could not establish a baseline against \`${BASE_TAG}\`, so this PR's API impact is unverified." "${detail}
+          ${tool_err}"
           elif printf '%s\n' "${report}" | awk '
               /^## incompatible changes$/ { in_section = 1; next }
               /^#/                        { in_section = 0 }
