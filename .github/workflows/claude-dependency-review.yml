@@ -129,7 +129,7 @@ jobs:
 
       - name: Supply-chain review
         id: review
-        uses: PaddleHQ/supply-chain-action@f1f5cda0a1ef65d20f1661cb5dd5e559c6b948ee # v0.3.1
+        uses: PaddleHQ/supply-chain-action@cba07ecfe35f1ebab6d2d73e4748ecba41dc13f5 # v0.3.3
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           merge-base:        ${{ needs.triage.outputs.merge_base }}
