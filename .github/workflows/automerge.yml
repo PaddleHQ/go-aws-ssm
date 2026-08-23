@@ -427,8 +427,10 @@ jobs:
         if: steps.build_config.outputs['automergePaddleConfig'] == 'true'
         run: |
           echo "🔍 Checking for file deletions in config sync..."
-          LINES_DELETED=$(git diff --shortstat ${{ needs.pr_info.outputs.merge_base }} \
-            | awk '{files+=$1; inserted+=$4; deleted+=$6} END {print deleted}')
+          # numstat, not shortstat: shortstat omits the insertions field on deletion-only
+          # diffs, shifting the deletion count into the wrong awk column ("-" sums as 0).
+          LINES_DELETED=$(git diff --numstat ${{ needs.pr_info.outputs.merge_base }} \
+            | awk '{deleted+=$2} END {print deleted+0}')
 
           if [ "$LINES_DELETED" -gt 0 ]; then
             REASON="Diff contains ${LINES_DELETED} deleted line(s) — paddle-config sync PRs are only auto-merged when changes are additions/modifications only."
