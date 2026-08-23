@@ -38,18 +38,14 @@ concurrency:
 jobs:
   discover:
     name: Discover fuzz targets
-    runs-on: ubuntu-24.04
+    runs-on: go-4-core
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
       has_targets: ${{ steps.list.outputs.has_targets }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -95,7 +91,7 @@ jobs:
     name: Fuzz ${{ matrix.name }}
     needs: discover
     if: needs.discover.outputs.has_targets == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: go-4-core
     timeout-minutes: 90
     permissions:
       contents: write
@@ -105,21 +101,16 @@ jobs:
       max-parallel: 4
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Create GitHub App Token
         id: app-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: 923765
           private-key: ${{ secrets.REPO_FILE_SYNC_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # peter-evans/create-pull-request handles its own git auth; leaving
           # persist-credentials on causes a "Duplicate header: Authorization"
@@ -140,7 +131,7 @@ jobs:
       # written post-job; restore-keys picks up the most recent entry for
       # this target when no exact match exists.
       - name: Restore fuzz cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/go-build/fuzz
           key: fuzz-${{ matrix.name }}-${{ github.run_id }}
@@ -219,20 +210,25 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [discover, fuzz]
-    runs-on: ubuntu-latest
+    runs-on: generic-2-core
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          egress-policy: audit
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        if: always()
+        uses: ./.github/actions/otel-export
         continue-on-error: true
         with:
-          otlpEndpoint: grpc://api.honeycomb.io:443/
-          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

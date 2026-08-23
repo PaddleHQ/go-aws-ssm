@@ -28,84 +28,38 @@ permissions:
 jobs:
   read-config:
     name: Read build configuration
-    runs-on: ubuntu-24.04
+    runs-on: generic-2-core
+    timeout-minutes: 10
     outputs:
       testRunner: ${{ steps.build_config.outputs.testRunner }}
       separateRaceTests: ${{ steps.build_config.outputs['separateRaceTests'] }}
       runsOn: ${{ steps.build_config.outputs.runsOn }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
 
       - name: Read build config
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
-  ecr-login:
-    name: ECR login for test container
-    runs-on: ubuntu-24.04
-    needs: read-config
-    outputs:
-      token: ${{ steps.ecr-token.outputs.token }}
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
-      - name: Configure AWS credentials
-        if: needs.read-config.outputs.testRunner != ''
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
-        with:
-          audience: sts.amazonaws.com
-          role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
-          role-to-assume: arn:aws:iam::067421297632:role/paddle-tfecr-gha-ecr-${{ github.event.repository.name }}
-          aws-region: us-east-1
-          role-duration-seconds: 900
-          retry-max-attempts: 3
-
-      - name: Get ECR login token
-        if: needs.read-config.outputs.testRunner != ''
-        id: ecr-token
-        run: |
-          echo "token=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})" >> "$GITHUB_OUTPUT"
-
   test:
-    name: Run tests and validate coverage
+    name: Run tests with coverage
     if: needs.read-config.outputs.separateRaceTests == 'true'
     needs:
       - read-config
-      - ecr-login
-    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
-    container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
+    timeout-minutes: 30
     steps:
-      - name: Mask ECR token in logs
-        if: needs.read-config.outputs.testRunner != ''
-        run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
-
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
-
-      - name: Allow git in workspace (required for Go -buildvcs in container)
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -113,6 +67,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           private: ${{ github.event.repository.private }}
           private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: cover
 
       - name: Download external dependencies
         run: |
@@ -126,23 +81,15 @@ jobs:
               curl -L -o "${target}" "${source}"                  # Copy the file
             done
 
-      - name: Cache test results
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
-          restore-keys: |
-            ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-
-            ${{ runner.os }}-go-test-
-
-      - name: Install test dependencies
-        run: |
-          go install gotest.tools/gotestsum@v1.13.0
-          go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@v0.0.14
+          tools: |
+            gotestsum
+            go-ctrf-json-reporter
 
       - name: Setup test databases
+        id: setup-databases
         uses: ./.github/actions/setup-databases
 
       - name: Setup Env
@@ -153,22 +100,90 @@ jobs:
                 echo "${source}=${target}" >> "$GITHUB_ENV"
             done
 
+      - name: Configure AWS credentials for ECR pull
+        if: needs.read-config.outputs.testRunner != ''
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          audience: sts.amazonaws.com
+          role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::067421297632:role/paddle-tfecr-gha-ecr-${{ github.event.repository.name }}
+          aws-region: us-east-1
+          role-duration-seconds: 900
+          retry-max-attempts: 3
+
+      - name: Log in to Amazon ECR
+        if: needs.read-config.outputs.testRunner != ''
+        uses: step-security/amazon-ecr-login@b8045438dc204276b62463a5e3cfedca8cb0dca0 # v2.1.6
+
       - name: Run tests with coverage
         timeout-minutes: 20
         env:
           ENVIRONMENT: ci
           CGO_ENABLED: 1
+          TEST_IMAGE: ${{ needs.read-config.outputs.testRunner }}
         run: |
-          gotestsum \
-            --format testname \
-            --jsonfile test-report.json \
-            -- \
-            -coverprofile=cover.out \
-            -covermode=atomic \
-            -coverpkg ./... \
-            -buildvcs=true \
-            -shuffle=on \
-            ./...
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/covdata"
+          gotestsum_args=(
+            --format testname
+            --jsonfile test-report.json
+            --rerun-fails
+            --rerun-fails-abort-on-data-race
+            --packages=./...
+            --
+            -cover
+            -covermode=atomic
+            -coverpkg ./...
+            -buildvcs=true
+            -shuffle=on
+            -args -test.gocoverdir="${GITHUB_WORKSPACE}/covdata"
+          )
+
+          if [ -z "$TEST_IMAGE" ]; then
+            gotestsum "${gotestsum_args[@]}"
+            exit 0
+          fi
+
+          # Run go test inside the configured testRunner image. Host-side
+          # steps (checkout, setup-go, setup-databases, JS-based reporting)
+          # stay on the host so GHA's JS-Actions-in-Alpine-arm64 restriction
+          # doesn't bite. --network host lets the containerised tests reach
+          # databases setup-databases provisioned on the host. --user matches
+          # the host UID so output files (coverage, CTRF) are readable by
+          # subsequent host steps.
+          docker run --rm \
+            --network host \
+            --user "$(id -u):$(id -g)" \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -v "$(go env GOMODCACHE):/tmp/gomodcache" \
+            -v "$(go env GOCACHE):/tmp/gocache" \
+            -e HOME=/tmp \
+            -e GOMODCACHE=/tmp/gomodcache \
+            -e GOCACHE=/tmp/gocache \
+            -e ENVIRONMENT -e CGO_ENABLED \
+            "$TEST_IMAGE" \
+            gotestsum "${gotestsum_args[@]}"
+
+      - name: Merge coverage profile
+        # gotestsum writes binary coverage into covdata/ (-test.gocoverdir),
+        # which accumulates across any --rerun-fails re-invocations. Merge it
+        # into the cover.out the downstream coverage steps read. An empty dir
+        # (a repo with no tests) yields a mode-only profile.
+        run: |
+          set -euo pipefail
+          if [ -n "$(ls -A "${GITHUB_WORKSPACE}/covdata" 2>/dev/null)" ]; then
+            go tool covdata textfmt -i="${GITHUB_WORKSPACE}/covdata" -o cover.out
+          else
+            echo "mode: atomic" > cover.out
+          fi
+
+      - name: Snapshot Postgres template cache
+        if: always()
+        uses: ./.github/actions/snapshot-postgres-templates
+        with:
+          testament-imported: ${{ steps.setup-databases.outputs.testament-imported }}
+          postgres-template-cache-hit: ${{ steps.setup-databases.outputs.postgres-template-cache-hit }}
+          postgres-major-version: ${{ steps.setup-databases.outputs.postgres-major-version }}
 
       - name: Convert test reports to CTRF
         if: always() && github.event_name == 'pull_request'
@@ -177,7 +192,7 @@ jobs:
 
       - name: Publish Test Report
         if: always() && github.event_name == 'pull_request'
-        uses: ctrf-io/github-test-reporter@0f299074936c32ccaab5be5230511f6b2b9080aa # v1.0.28
+        uses: ctrf-io/github-test-reporter@e500b992f936420eb633c91644cf10d4d71df700 # v1.1.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -202,7 +217,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -216,7 +231,7 @@ jobs:
 
       - name: Ensure coverage is good
         if: github.event_name == 'pull_request'
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
@@ -231,9 +246,32 @@ jobs:
         if: fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100)
         run: exit 1
 
+      # Emitted from the merge-queue run only: that build is the merge commit
+      # about to land on main, so its coverage is main's coverage. One event
+      # per merge to the ci-coverage dataset; graph MAX(coverage.total) by
+      # service.name over time.
+      - name: Push coverage to Honeycomb
+        if: github.event_name == 'merge_group'
+        continue-on-error: true
+        env:
+          HONEYCOMB_TEAM: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          REQUIRED_COVERAGE: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
+          SERVICE_NAME: ${{ github.event.repository.name }}
+          COMMIT_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          curl -sf https://api.honeycomb.io/1/events/ci-coverage \
+            -H "X-Honeycomb-Team: $HONEYCOMB_TEAM" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc \
+              --argjson total "$TOTAL_COVERAGE" \
+              --argjson required "$REQUIRED_COVERAGE" \
+              --arg service "$SERVICE_NAME" \
+              --arg commit "$COMMIT_SHA" \
+              '{"coverage.total": $total, "coverage.required": $required, "service.name": $service, "branch": "main", "commit": $commit}')"
+
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
@@ -257,27 +295,14 @@ jobs:
     if: needs.read-config.outputs.separateRaceTests != 'true'
     needs:
       - read-config
-      - ecr-login
-    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
-    container: ${{ needs.read-config.outputs.testRunner != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"AWS","password":"{1}"}}}}', needs.read-config.outputs.testRunner, needs.ecr-login.outputs.token)) || '' }}
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
+    timeout-minutes: 30
     steps:
-      - name: Mask ECR token in logs
-        if: needs.read-config.outputs.testRunner != ''
-        run: echo "::add-mask::${{ needs.ecr-login.outputs.token }}"
-
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
-
-      - name: Allow git in workspace (required for Go -buildvcs in container)
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -285,6 +310,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           private: ${{ github.event.repository.private }}
           private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: race
 
       - name: Download external dependencies
         run: |
@@ -298,23 +324,15 @@ jobs:
               curl -L -o "${target}" "${source}"                  # Copy the file
             done
 
-      - name: Cache test results
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
-          restore-keys: |
-            ${{ runner.os }}-go-test-${{ hashFiles('**/go.sum') }}-
-            ${{ runner.os }}-go-test-
-
-      - name: Install test dependencies
-        run: |
-          go install gotest.tools/gotestsum@v1.13.0
-          go install github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter@v0.0.14
+          tools: |
+            gotestsum
+            go-ctrf-json-reporter
 
       - name: Setup test databases
+        id: setup-databases
         uses: ./.github/actions/setup-databases
 
       - name: Setup Env
@@ -325,24 +343,93 @@ jobs:
                 echo "${source}=${target}" >> "$GITHUB_ENV"
             done
 
+      - name: Configure AWS credentials for ECR pull
+        if: needs.read-config.outputs.testRunner != ''
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          audience: sts.amazonaws.com
+          role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::067421297632:role/paddle-tfecr-gha-ecr-${{ github.event.repository.name }}
+          aws-region: us-east-1
+          role-duration-seconds: 900
+          retry-max-attempts: 3
+
+      - name: Log in to Amazon ECR
+        if: needs.read-config.outputs.testRunner != ''
+        uses: step-security/amazon-ecr-login@b8045438dc204276b62463a5e3cfedca8cb0dca0 # v2.1.6
+
       - name: Run tests with coverage and race detector
         timeout-minutes: 20
         env:
           ENVIRONMENT: ci
           CGO_ENABLED: 1
+          GORACE: atexit_sleep_ms=50
+          TEST_IMAGE: ${{ needs.read-config.outputs.testRunner }}
         run: |
-          gotestsum \
-            --format testname \
-            --jsonfile test-report.json \
-            -- \
-            -v \
-            -coverprofile=cover.out \
-            -covermode=atomic \
-            -coverpkg ./... \
-            -race \
-            -buildvcs=true \
-            -shuffle=on \
-            ./...
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/covdata"
+          gotestsum_args=(
+            --format testname
+            --jsonfile test-report.json
+            --rerun-fails
+            --rerun-fails-abort-on-data-race
+            --packages=./...
+            --
+            -v
+            -cover
+            -covermode=atomic
+            -coverpkg ./...
+            -race
+            -buildvcs=true
+            -shuffle=on
+            -args -test.gocoverdir="${GITHUB_WORKSPACE}/covdata"
+          )
+
+          if [ -z "$TEST_IMAGE" ]; then
+            gotestsum "${gotestsum_args[@]}"
+            exit 0
+          fi
+
+          # Run go test inside the configured testRunner image. Host-side
+          # steps (checkout, setup-go, setup-databases, JS-based reporting)
+          # stay on the host so GHA's JS-Actions-in-Alpine-arm64 restriction
+          # doesn't bite. --network host lets the containerised tests reach
+          # databases setup-databases provisioned on the host. --user matches
+          # the host UID so output files (coverage, CTRF) are readable by
+          # subsequent host steps.
+          docker run --rm \
+            --network host \
+            --user "$(id -u):$(id -g)" \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -v "$(go env GOMODCACHE):/tmp/gomodcache" \
+            -v "$(go env GOCACHE):/tmp/gocache" \
+            -e HOME=/tmp \
+            -e GOMODCACHE=/tmp/gomodcache \
+            -e GOCACHE=/tmp/gocache \
+            -e ENVIRONMENT -e CGO_ENABLED -e GORACE \
+            "$TEST_IMAGE" \
+            gotestsum "${gotestsum_args[@]}"
+
+      - name: Merge coverage profile
+        # gotestsum writes binary coverage into covdata/ (-test.gocoverdir),
+        # which accumulates across any --rerun-fails re-invocations. Merge it
+        # into the cover.out the downstream coverage steps read. An empty dir
+        # (a repo with no tests) yields a mode-only profile.
+        run: |
+          set -euo pipefail
+          if [ -n "$(ls -A "${GITHUB_WORKSPACE}/covdata" 2>/dev/null)" ]; then
+            go tool covdata textfmt -i="${GITHUB_WORKSPACE}/covdata" -o cover.out
+          else
+            echo "mode: atomic" > cover.out
+          fi
+
+      - name: Snapshot Postgres template cache
+        if: always()
+        uses: ./.github/actions/snapshot-postgres-templates
+        with:
+          testament-imported: ${{ steps.setup-databases.outputs.testament-imported }}
+          postgres-template-cache-hit: ${{ steps.setup-databases.outputs.postgres-template-cache-hit }}
+          postgres-major-version: ${{ steps.setup-databases.outputs.postgres-major-version }}
 
       - name: Convert test reports to CTRF
         if: always()
@@ -351,7 +438,7 @@ jobs:
 
       - name: Publish Test Report
         if: always()
-        uses: ctrf-io/github-test-reporter@0f299074936c32ccaab5be5230511f6b2b9080aa # v1.0.28
+        uses: ctrf-io/github-test-reporter@e500b992f936420eb633c91644cf10d4d71df700 # v1.1.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -376,7 +463,7 @@ jobs:
 
       - name: Read build config
         id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
           config: ${{ github.workspace }}/build-config.yaml
 
@@ -390,7 +477,7 @@ jobs:
 
       - name: Ensure coverage is good
         if: github.event_name == 'pull_request'
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
@@ -405,9 +492,32 @@ jobs:
         if: fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100)
         run: exit 1
 
+      # Emitted from the merge-queue run only: that build is the merge commit
+      # about to land on main, so its coverage is main's coverage. One event
+      # per merge to the ci-coverage dataset; graph MAX(coverage.total) by
+      # service.name over time.
+      - name: Push coverage to Honeycomb
+        if: github.event_name == 'merge_group'
+        continue-on-error: true
+        env:
+          HONEYCOMB_TEAM: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          REQUIRED_COVERAGE: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
+          SERVICE_NAME: ${{ github.event.repository.name }}
+          COMMIT_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          curl -sf https://api.honeycomb.io/1/events/ci-coverage \
+            -H "X-Honeycomb-Team: $HONEYCOMB_TEAM" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc \
+              --argjson total "$TOTAL_COVERAGE" \
+              --argjson required "$REQUIRED_COVERAGE" \
+              --arg service "$SERVICE_NAME" \
+              --arg commit "$COMMIT_SHA" \
+              '{"coverage.total": $total, "coverage.required": $required, "service.name": $service, "branch": "main", "commit": $commit}')"
+
       - name: Comment PR to update build coverage
         if: github.event_name == 'pull_request'
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: build_coverage
           mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
@@ -431,15 +541,11 @@ jobs:
     if: needs.read-config.outputs.separateRaceTests == 'true'
     needs:
       - read-config
-    runs-on: ${{ needs.read-config.outputs.runsOn || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
+    timeout-minutes: 30
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
@@ -450,6 +556,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           private: ${{ github.event.repository.private }}
           private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: race
 
       - name: Download external dependencies
         run: |
@@ -463,16 +570,9 @@ jobs:
               curl -L -o "${target}" "${source}"                  # Copy the file
             done
 
-      - name: Cache test results
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-test-race-${{ hashFiles('**/go.sum') }}-${{ hashFiles('**/*.go') }}
-          restore-keys: |
-            ${{ runner.os }}-go-test-race-${{ hashFiles('**/go.sum') }}-
-            ${{ runner.os }}-go-test-race-
+      - name: Setup test databases
+        id: setup-databases
+        uses: ./.github/actions/setup-databases
 
       - name: Setup Env
         run: |
@@ -487,8 +587,10 @@ jobs:
         env:
           ENVIRONMENT: ci
           CGO_ENABLED: 1
+          GORACE: atexit_sleep_ms=50
         run: |
-          mapfile -t test_packages < <(go list ./... | grep -v "^github.com/${{ github.repository }}$")
+          module=$(go list -m)
+          mapfile -t test_packages < <(go list ./... | grep -v "^${module}$")
 
           go test \
             -race \
@@ -496,32 +598,46 @@ jobs:
             -shuffle=on \
             "${test_packages[@]}"
 
-  automerge_tests:
-    name: Automerge unit tests with and without race detector
+      - name: Snapshot Postgres template cache
+        if: always()
+        uses: ./.github/actions/snapshot-postgres-templates
+        with:
+          testament-imported: ${{ steps.setup-databases.outputs.testament-imported }}
+          postgres-template-cache-hit: ${{ steps.setup-databases.outputs.postgres-template-cache-hit }}
+          postgres-major-version: ${{ steps.setup-databases.outputs.postgres-major-version }}
+
+  validate_tests:
+    name: Run tests and validate coverage
     needs:
       - read-config
       - test-combined
       - test
       - race
-    # `test-combined` and (`test` + `race`) are mutually exclusive paths
-    # selected by `separateRaceTests`, so one branch is always skipped.
-    # Without this condition the default `success()` gate skips this job
-    # whenever any need is skipped — meaning the automerge trigger never
-    # fires.
-    if: |-
-      !cancelled() && (
-        needs.test-combined.result == 'success' ||
-        (needs.test.result == 'success' && needs.race.result == 'success')
-      )
-    runs-on: ubuntu-24.04
+    # Always run so the required status check resolves to the actual outcome
+    # of whichever mutex path ran. A SKIPPED required check is treated as
+    # passing by branch protections, which previously let failing test runs
+    # merge when the named-required job happened to be the skipped one.
+    if: always() && !cancelled()
+    runs-on: generic-2-core
+    timeout-minutes: 10
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
+      - name: Validate test results
+        env:
+          TEST_COMBINED: ${{ needs.test-combined.result }}
+          TEST: ${{ needs.test.result }}
+          RACE: ${{ needs.race.result }}
+        run: |
+          if [[ "$TEST_COMBINED" == "success" ]]; then
+            exit 0
+          fi
+          if [[ "$TEST" == "success" && "$RACE" == "success" ]]; then
+            exit 0
+          fi
+          echo "Tests did not succeed: test-combined=$TEST_COMBINED test=$TEST race=$RACE"
+          exit 1
 
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: false
@@ -535,32 +651,26 @@ jobs:
   otel_cicd_export:
     name: OpenTelemetry Export Trace
     if: always()
-    needs: [read-config, ecr-login, test, test-combined, race, automerge_tests]
-    runs-on: ubuntu-latest
+    needs: [read-config, test, test-combined, race, validate_tests]
+    runs-on: generic-2-core
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          egress-policy: audit
-
-      - name: Fetch workflow run timestamps
-        id: run_times
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          json=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}")
-          echo "created_at=$(echo "$json" | jq -r '.created_at')" >> "$GITHUB_OUTPUT"
-          echo "run_started_at=$(echo "$json" | jq -r '.run_started_at')" >> "$GITHUB_OUTPUT"
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        if: always()
+        uses: ./.github/actions/otel-export
         continue-on-error: true
         with:
-          otlpEndpoint: grpc://api.honeycomb.io:443/
-          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-          extraAttributes: "github.workflow_run.created_at=${{ steps.run_times.outputs.created_at }},github.workflow_run.run_started_at=${{ steps.run_times.outputs.run_started_at }}"
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

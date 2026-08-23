@@ -1,8 +1,28 @@
+# GENERATED FILE - DO NOT EDIT
+# Synced from the actionlint_runner_labels local in
+# PaddleHQ/terraform-github by the sync-actionlint-runners workflow.
 self-hosted-runner:
   labels:
-    - go-4-core
-    - go-4-core-latest
-    - go-8-core
-    - go-8-core-latest
+    - airflow-2-core
+    - airflow-4-core
+    - dbt-2-core
+    - dbt-4-core
+    - e2e-runner-16
+    - e2e-runner-2
+    - e2e-runner-32
+    - e2e-runner-4
+    - e2e-runner-8
+    - generic-2-core
     - go-16-core
-    - go-16-core-latest
+    - go-2-core
+    - go-32-core
+    - go-4-core
+    - go-4-core-amd64
+    - go-64-core
+    - go-8-core
+    - permifrost-2-core
+    - permifrost-4-core
+    - terraform-16-core
+    - terraform-2-core
+    - terraform-4-core
+    - terraform-8-core

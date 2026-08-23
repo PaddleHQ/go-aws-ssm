@@ -18,15 +18,11 @@ permissions:
 jobs:
   pr_size:
     name: Label PRs with size and comment if too large
-    runs-on: ubuntu-latest
+    runs-on: generic-2-core
+    timeout-minutes: 10
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Check out code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
@@ -40,8 +36,10 @@ jobs:
         id: lines_changed
         env:
           PATTERNS: ${{ steps.generated_paths.outputs.patterns }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          merge_base=$(git merge-base origin/${{ github.event.pull_request.base.ref }} HEAD)
+          base_ref="${BASE_REF#refs/heads/}"
+          merge_base=$(git merge-base "origin/${base_ref}" HEAD)
 
           # Build git pathspec exclusions from the resolved pattern list.
           # `glob` magic is needed for `**` to match across path segments.
@@ -89,7 +87,7 @@ jobs:
           gh pr edit ${{ github.event.pull_request.number }} --add-label "size/${SIZE}"
 
       - name: Comment PR to warn about PR size
-        uses: step-security/actions-comment-pull-request@7f6021194300cf361f7ba99a346c4daa6cab809b # v3.0.1
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: very_large_pr
           mode: ${{ steps.lines_changed.outputs.total >= 1000 && 'upsert' || 'delete' }}
@@ -110,20 +108,25 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [pr_size]
-    runs-on: ubuntu-latest
+    runs-on: generic-2-core
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          egress-policy: audit
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        if: always()
+        uses: ./.github/actions/otel-export
         continue-on-error: true
         with:
-          otlpEndpoint: grpc://api.honeycomb.io:443/
-          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

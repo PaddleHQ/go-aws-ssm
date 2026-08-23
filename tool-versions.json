@@ -1,0 +1,33 @@
+{
+	"comment": "Pinned versions of Go CLI tools used by validate.yml and test.yml. Bumped daily by sync-tool-versions.yml from PaddleHQ/github-actions-custom-images. Synced to consumer repos by paddle-config.",
+	"tools": {
+		"govulncheck": {
+			"version": "v1.1.4",
+			"package": "golang.org/x/vuln/cmd/govulncheck"
+		},
+		"modernize": {
+			"version": "v0.23.0",
+			"package": "golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize"
+		},
+		"modfmt": {
+			"version": "v0.0.0-20260105113844-287023c3d905",
+			"package": "github.com/abhijit-hota/modfmt"
+		},
+		"ghokin": {
+			"version": "v4.2.0",
+			"package": "github.com/PaddleHQ/ghokin/v4"
+		},
+		"gorelease": {
+			"version": "v0.0.0-20260727155853-b88d891fe743",
+			"package": "golang.org/x/exp/cmd/gorelease"
+		},
+		"gotestsum": {
+			"version": "v1.13.0",
+			"package": "gotest.tools/gotestsum"
+		},
+		"go-ctrf-json-reporter": {
+			"version": "v0.1.0",
+			"package": "github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter"
+		}
+	}
+}

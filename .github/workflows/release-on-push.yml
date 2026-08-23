@@ -17,17 +17,13 @@ permissions:
 jobs:
   release_on_push:
     name: Create release on push to main branch
-    runs-on: ubuntu-latest
+    runs-on: generic-2-core
+    timeout-minutes: 5
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          egress-policy: audit
-
       - name: Create release based on label
-        uses: step-security/release-on-push-action@cb8d0f4644b90de8de1c49113ad7e66f13224c3d # v0.28.5
+        uses: step-security/release-on-push-action@b9dee0685e99e905fe90cba8ba9ed92c7f3806b4 # v0.28.6
         with:
           bump_version_scheme: norelease
           use_github_release_notes: true
@@ -35,7 +31,7 @@ jobs:
 
       - name: Checkout code # required for automerge
         if: format('refs/heads/{0}', github.event.repository.default_branch) != github.ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
@@ -51,20 +47,25 @@ jobs:
     name: OpenTelemetry Export Trace
     if: always()
     needs: [release_on_push]
-    runs-on: ubuntu-latest
+    runs-on: generic-2-core
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          egress-policy: audit
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        if: always()
+        uses: ./.github/actions/otel-export
         continue-on-error: true
         with:
-          otlpEndpoint: grpc://api.honeycomb.io:443/
-          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
