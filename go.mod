@@ -3,7 +3,7 @@ module github.com/PaddleHQ/go-aws-ssm
 go 1.25
 
 require (
-	github.com/aws/aws-sdk-go v1.48.15
+	github.com/aws/aws-sdk-go v1.55.8
 	github.com/mitchellh/mapstructure v1.5.0
 )
 
