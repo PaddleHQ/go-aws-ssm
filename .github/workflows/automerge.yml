@@ -573,7 +573,7 @@ jobs:
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [pr_info, check_dependabot_go_deps, check_dependabot_action_refs, check_library_template_changes, check_coding_standards_changes, check_paddle_config_changes, check_renovate_changes, automerge]
     runs-on: generic-2-core
     timeout-minutes: 5

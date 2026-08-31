@@ -8,6 +8,10 @@ on:
     types:
       - completed
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.check_run.head_sha }}
+  cancel-in-progress: true
+
 permissions:
   actions: write # required for `workflow-dispatch` to trigger the automerge workflow
   contents: read
@@ -49,7 +53,7 @@ jobs:
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [trigger_workflows_after_checks_complete]
     runs-on: generic-2-core
     timeout-minutes: 5

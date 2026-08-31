@@ -78,12 +78,30 @@ jobs:
           # Base go.mod via the API: under the blob:none checkout the
           # merge-base blob isn't local and a post-checkout lazy fetch is
           # unauthenticated. HEAD's go.mod is the working-tree copy.
-          gh api "repos/${REPOSITORY}/contents/go.mod?ref=${MERGE_BASE}" --jq '.content' \
-            | base64 -d > "${RUNNER_TEMP}/base.go.mod"
+          BASE_GOMOD="${RUNNER_TEMP}/base.go.mod"
+          : > "${BASE_GOMOD}"
+          if gh api "repos/${REPOSITORY}/contents/go.mod?ref=${MERGE_BASE}" --jq '.content' \
+              > "${RUNNER_TEMP}/base.b64" 2> "${RUNNER_TEMP}/gh.err"; then
+            base64 -d < "${RUNNER_TEMP}/base.b64" > "${BASE_GOMOD}"
+          elif grep -q 'HTTP 404' "${RUNNER_TEMP}/gh.err"; then
+            # This file syncs to repos with no go.mod at all, and a PR may be
+            # adding the module. An empty base diffs correctly against both.
+            echo "::notice::No go.mod at the merge base - treating it as empty"
+          else
+            # Anything else (auth, rate limit) would read as "no deps changed"
+            # and silently skip the review, so fail closed instead.
+            cat "${RUNNER_TEMP}/gh.err"
+            echo "::error::could not read the base go.mod"
+            exit 1
+          fi
+
+          # Likewise a PR that removes the module leaves no HEAD side.
+          HEAD_GOMOD=go.mod
+          [ -f "${HEAD_GOMOD}" ] || HEAD_GOMOD=/dev/null
 
           # Two booleans (0/1) off the go.mod diff. awk not grep: BSD grep
           # mishandles mixed -/+ char classes and skips alternating matches.
-          diff_gomod() { diff -u "${RUNNER_TEMP}/base.go.mod" go.mod || true; }
+          diff_gomod() { diff -u "${BASE_GOMOD}" "${HEAD_GOMOD}" || true; }
           has() { diff_gomod | awk "$1" | grep -q . && echo 1 || echo 0; }
           PADDLEHQ=$(has '/^[+-][^+-]/ && /github\.com\/PaddleHQ\//')
           THIRD_PARTY=$(has '/^[+-][^+-]/ && /[a-zA-Z0-9._~\/-]+\.[a-zA-Z0-9._~\/-]+ v[0-9]/ && !/github\.com\/PaddleHQ\//')
@@ -129,7 +147,7 @@ jobs:
 
       - name: Supply-chain review
         id: review
-        uses: PaddleHQ/supply-chain-action@cba07ecfe35f1ebab6d2d73e4748ecba41dc13f5 # v0.3.3
+        uses: PaddleHQ/supply-chain-action@7bf2868898b81c768afd01daa3d7edb28b8c00e4 # v0.3.4
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           merge-base:        ${{ needs.triage.outputs.merge_base }}

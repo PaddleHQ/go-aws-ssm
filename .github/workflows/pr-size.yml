@@ -106,7 +106,7 @@ jobs:
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
-    if: always()
+    if: always() && needs.pr_size.result != 'skipped'
     needs: [pr_size]
     runs-on: generic-2-core
     timeout-minutes: 5

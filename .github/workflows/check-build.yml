@@ -45,7 +45,7 @@ jobs:
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
-    if: always()
+    if: always() && needs.check_build.result != 'skipped'
     needs: [check_build]
     runs-on: generic-2-core
     timeout-minutes: 5
