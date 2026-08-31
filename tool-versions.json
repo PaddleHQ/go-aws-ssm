@@ -18,7 +18,7 @@
 			"package": "github.com/PaddleHQ/ghokin/v4"
 		},
 		"gorelease": {
-			"version": "v0.0.0-20260727155853-b88d891fe743",
+			"version": "v0.0.0-20260824195058-e88cd73687aa",
 			"package": "golang.org/x/exp/cmd/gorelease"
 		},
 		"gotestsum": {
@@ -26,7 +26,7 @@
 			"package": "gotest.tools/gotestsum"
 		},
 		"go-ctrf-json-reporter": {
-			"version": "v0.1.0",
+			"version": "v0.2.0",
 			"package": "github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter"
 		}
 	}
