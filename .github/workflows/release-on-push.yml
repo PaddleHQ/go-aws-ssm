@@ -3,22 +3,37 @@
 name: Create release on push to main branch
 
 on:
-  pull_request:
   push:
     branches:
       - main
       - master
+  # `labeled`/`unlabeled` included so adding a release label re-runs the dry run
+  # against the PR's final label set, not whatever was set at the last push.
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
 
 permissions:
   contents: write
   pull-requests: read
-  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
 
 jobs:
   release_on_push:
     name: Create release on push to main branch
     runs-on: generic-2-core
     timeout-minutes: 5
+
+    # Without a release label the action exits at its own `norelease` check
+    # before computing a version, so a dry run on such a PR validates nothing.
+    if: |-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'release:major') ||
+      contains(github.event.pull_request.labels.*.name, 'release:minor') ||
+      contains(github.event.pull_request.labels.*.name, 'release:patch')
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -29,23 +44,9 @@ jobs:
           use_github_release_notes: true
           dry_run: ${{ format('refs/heads/{0}', github.event.repository.default_branch) != github.ref }}
 
-      - name: Checkout code # required for automerge
-        if: format('refs/heads/{0}', github.event.repository.default_branch) != github.ref
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-
-      - name: Automerge
-        if: format('refs/heads/{0}', github.event.repository.default_branch) != github.ref
-        uses: ./.github/actions/trigger-automerge
-        with:
-          event: ${{ toJSON(github.event) }}
-          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
-
   otel_cicd_export:
     name: OpenTelemetry Export Trace
-    if: always()
+    if: always() && needs.release_on_push.result != 'skipped'
     needs: [release_on_push]
     runs-on: generic-2-core
     timeout-minutes: 5

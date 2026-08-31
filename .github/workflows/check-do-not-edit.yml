@@ -18,13 +18,11 @@ jobs:
     timeout-minutes: 10
     name: Check for DO NOT EDIT files
 
-    steps:
-      - name: Skip if the PR was created by paddle-repo-file-sync[bot]
-        if: github.actor == 'paddle-repo-file-sync[bot]'
-        run: |
-          echo "Skipping check-do-not-edit for bot PR"
-          exit 0
+    # File-sync PRs are supposed to rewrite DO NOT EDIT files, so the check has
+    # nothing useful to say about them.
+    if: github.actor != 'paddle-repo-file-sync[bot]'
 
+    steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -88,7 +86,9 @@ jobs:
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
-    if: always()
+    # always() alone still runs when the checked job is skipped, so a bot PR would
+    # export a trace for a job that did nothing.
+    if: always() && needs['check-do-not-edit'].result != 'skipped'
     needs: [check-do-not-edit]
     runs-on: generic-2-core
     timeout-minutes: 5

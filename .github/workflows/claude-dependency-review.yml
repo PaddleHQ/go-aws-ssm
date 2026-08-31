@@ -141,7 +141,9 @@ jobs:
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
-    if: always()
+    # always() alone is true for a skipped dependency, so a run where nothing
+    # happened would still boot a runner to export an empty trace.
+    if: always() && needs.triage.result != 'skipped'
     needs: [triage, review]
     runs-on: generic-2-core
     timeout-minutes: 5

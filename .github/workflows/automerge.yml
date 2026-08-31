@@ -54,25 +54,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          PR=$(gh pr view ${{ github.event.inputs.pr_number }} --json isDraft,author,labels,headRefName,baseRefName)
+          PR=$(gh pr view ${{ github.event.inputs.pr_number }} --json isDraft,author,labels,headRefOid,baseRefName,state)
 
           {
+            echo "state=$(echo "${PR}" | jq -r '.state')"
             echo "draft=$(echo "${PR}" | jq -r '.isDraft')"
             echo "user_login=$(echo "${PR}" | jq -r '.author.login')"
             echo "labels=$(echo "${PR}" | jq -r '.labels | map(.name) | join(",")')"
-            echo "head_ref=$(echo "${PR}" | jq -r '.headRefName')"
+            echo "head_sha=$(echo "${PR}" | jq -r '.headRefOid')"
             echo "base_ref=$(echo "${PR}" | jq -r '.baseRefName')"
           } >> "$GITHUB_OUTPUT"
 
+      # Every job checks out this commit rather than the head branch, which the
+      # merge deletes; it also pins all gates to the commit state was read from.
       - name: "📥 Checkout PR Code"
+        if: steps.pr-info.outputs.state == 'OPEN'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.pr-info.outputs.head_ref }}
+          ref: ${{ steps.pr-info.outputs.head_sha }}
           persist-credentials: false
           fetch-depth: 0
 
       - name: "⛙ Get Merge Info"
         id: merge-base
+        if: steps.pr-info.outputs.state == 'OPEN'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -83,6 +88,7 @@ jobs:
 
       - name: "📝 List changed files"
         id: changed
+        if: steps.pr-info.outputs.state == 'OPEN'
         env:
           MERGE_BASE: ${{ steps.merge-base.outputs.merge_base }}
         run: |
@@ -96,46 +102,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
     outputs:
+      state: ${{ steps.pr-info.outputs.state }}
       draft: ${{ steps.pr-info.outputs.draft }}
       user_login: ${{ steps.pr-info.outputs.user_login }}
       labels: ${{ steps.pr-info.outputs.labels }}
-      head_ref: ${{ steps.pr-info.outputs.head_ref }}
+      head_sha: ${{ steps.pr-info.outputs.head_sha }}
       merge_base: ${{ steps.merge-base.outputs.merge_base }}
       changed_files: ${{ steps.changed.outputs.files }}
 
-
-  # --
-  # Confirm the automerge secret is present before any gate runs. Waiting for
-  # checks is no longer done here — the `automerge` job enables GitHub-native
-  # auto-merge (`gh pr merge --auto`), so the rulesets' required checks, merge
-  # queue and approval gate the actual merge.
-  wait_for_ready:
-    name: Confirm automerge is enabled
-    runs-on: generic-2-core
-    timeout-minutes: 5
-    needs:
-      - pr_info
-
-    if: |-
-      needs.pr_info.outputs.draft == 'false' && (
-        needs.pr_info.outputs.user_login == 'app/dependabot' ||
-        needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' ||
-        needs.pr_info.outputs.user_login == 'app/paddle-renovate'
-      )
-
-    steps:
-      - name: "🔐 Verify Automerge Secret Available"
-        id: check-secret
-        run: |
-          if [ -z "${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}" ]; then
-            echo "❌ No automerge secret found - automerge disabled"
-          else
-            echo "✅ Automerge secret available"
-            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
-          fi
-
-    outputs:
-      can_automerge: ${{ steps.check-secret.outputs.can_automerge }}
 
   # --
   # Check the source and the changes of the PR
@@ -151,19 +125,17 @@ jobs:
     name: "[Automerge/Check] 🤖 Validate Go dependency updates"
     needs:
       - pr_info
-      - wait_for_ready
     runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
-      needs.wait_for_ready.outputs.can_automerge == 'true' &&
       needs.pr_info.outputs.user_login == 'app/dependabot'
 
     steps:
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.pr_info.outputs.head_ref }}
+          ref: ${{ needs.pr_info.outputs.head_sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -204,19 +176,17 @@ jobs:
     name: "[Automerge/Check] 🛡️ Validate workflow action updates"
     needs:
       - pr_info
-      - wait_for_ready
     runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
-      needs.wait_for_ready.outputs.can_automerge == 'true' &&
       needs.pr_info.outputs.user_login == 'app/dependabot'
 
     steps:
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.pr_info.outputs.head_ref }}
+          ref: ${{ needs.pr_info.outputs.head_sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -282,12 +252,10 @@ jobs:
     name: "[Automerge/Check] 📝 Check GO Library Template changes"
     needs:
       - pr_info
-      - wait_for_ready
     runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
-      needs.wait_for_ready.outputs.can_automerge == 'true' &&
       needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
       (
         contains(needs.pr_info.outputs.labels, 'origin:go-library-template') ||
@@ -299,7 +267,7 @@ jobs:
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.pr_info.outputs.head_ref }}
+          ref: ${{ needs.pr_info.outputs.head_sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -343,12 +311,10 @@ jobs:
     name: "[Automerge/Check] 📋 Check Coding Standards Changes"
     needs:
       - pr_info
-      - wait_for_ready
     runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
-      needs.wait_for_ready.outputs.can_automerge == 'true' &&
       needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
       contains(needs.pr_info.outputs.labels, 'origin:coding-standards')
 
@@ -356,7 +322,7 @@ jobs:
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.pr_info.outputs.head_ref }}
+          ref: ${{ needs.pr_info.outputs.head_sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -399,12 +365,10 @@ jobs:
     name: "[Automerge/Check] ⚙️ Check Paddle Config Changes"
     needs:
       - pr_info
-      - wait_for_ready
     runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
-      needs.wait_for_ready.outputs.can_automerge == 'true' &&
       needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
       contains(needs.pr_info.outputs.labels, 'origin:paddle-config')
 
@@ -412,7 +376,7 @@ jobs:
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.pr_info.outputs.head_ref }}
+          ref: ${{ needs.pr_info.outputs.head_sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -457,12 +421,10 @@ jobs:
     name: "[Automerge/Check] ⚙️ Check Renovate Changes"
     needs:
       - pr_info
-      - wait_for_ready
     runs-on: generic-2-core
     timeout-minutes: 5
 
     if: |-
-      needs.wait_for_ready.outputs.can_automerge == 'true' &&
       needs.pr_info.outputs.user_login == 'app/paddle-renovate' &&
       (
         contains(needs.pr_info.outputs.labels, 'origin:outboxer') ||
@@ -473,7 +435,7 @@ jobs:
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.pr_info.outputs.head_ref }}
+          ref: ${{ needs.pr_info.outputs.head_sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -519,7 +481,6 @@ jobs:
 
     needs:
       - pr_info
-      - wait_for_ready
       - check_dependabot_go_deps
       - check_dependabot_action_refs
       - check_library_template_changes
@@ -529,8 +490,12 @@ jobs:
 
     # Run if any of the check jobs approved automerge
     # always() ensures this is a `or` condition and does not depend on ALL the checks passing, but only one.
+    # These read live PR state, so they still hold if the PR merged or became a
+    # draft after dispatch.
     if: |-
-      always() && (
+      always() &&
+      needs.pr_info.outputs.state == 'OPEN' &&
+      needs.pr_info.outputs.draft == 'false' && (
         needs.check_dependabot_go_deps.outputs.can_automerge == 'true' ||
         needs.check_dependabot_action_refs.outputs.can_automerge == 'true' ||
         needs.check_library_template_changes.outputs.can_automerge == 'true' ||
@@ -543,7 +508,7 @@ jobs:
       - name: "📥 Checkout PR Code"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.pr_info.outputs.head_ref }}
+          ref: ${{ needs.pr_info.outputs.head_sha }}
           persist-credentials: false
 
       - name: "📖 Read Build Configuration"
@@ -560,25 +525,56 @@ jobs:
           app-id: 1045853
           private-key: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}
 
+      # Read at the point of action: the state `pr_info` saw is minutes old by the
+      # time the gates finish, and approving or merging a closed PR errors.
+      - name: "🔍 Confirm the PR is still open"
+        id: still-open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          STATE=$(gh pr view "${{ github.event.inputs.pr_number }}" --json state --jq '.state')
+          echo "PR is ${STATE}"
+          echo "state=${STATE}" >> "$GITHUB_OUTPUT"
+
       - name: "✅ Auto Approve PR"
-        if: steps.build_config.outputs['approveBotEnabled'] == 'true'
+        if: steps.build_config.outputs['approveBotEnabled'] == 'true' &&
+          steps.still-open.outputs.state == 'OPEN'
         run: gh pr review --approve "${{ github.event.inputs.pr_number }}"
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
 
       - name: "🔀 Auto Merge PR"
-        if: steps.build_config.outputs['mergeBotEnabled'] == 'true'
+        if: steps.build_config.outputs['mergeBotEnabled'] == 'true' &&
+          steps.still-open.outputs.state == 'OPEN'
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-        # Enable GitHub-native auto-merge. The PR merges once the rulesets are
-        # satisfied (required checks green, approval present, merge queue), so
-        # this returns immediately rather than holding a runner until checks pass.
-        run: gh pr merge --auto --squash "${{ github.event.inputs.pr_number }}"
+          # The app token can't read branch rules; reads use the workflow token.
+          READ_GH_TOKEN: ${{ github.token }}
+        run: |
+          PR="${{ github.event.inputs.pr_number }}"
+
+          # Merge-queue repos: arm native auto-merge and let the queue complete the
+          # merge (entering it honours the app's ruleset bypass). A failed lookup
+          # takes this path too, so the fail-safe is today's behaviour.
+          QUEUE_RULES=$(GH_TOKEN="${READ_GH_TOKEN}" gh api \
+            "repos/${{ github.repository }}/rules/branches/${{ github.event.repository.default_branch }}" \
+            --jq '[.[] | select(.type == "merge_queue")] | length' 2>/dev/null || echo "unknown")
+          if [ "${QUEUE_RULES}" != "0" ]; then
+            gh pr merge --auto --squash "$PR"
+            exit 0
+          fi
+
+          # No queue: native auto-merge never fires (app approvals don't satisfy
+          # required reviews), so ask the server for a direct merge — the app bypasses
+          # only the approval rule, so pending required checks still refuse it. A
+          # refusal is expected on dispatches that race the checks; the next check
+          # completion re-dispatches this workflow and retries.
+          gh pr merge --admin --squash "$PR" || echo "Not mergeable yet - a later dispatch retries"
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
     if: always()
-    needs: [pr_info, wait_for_ready, check_dependabot_go_deps, check_dependabot_action_refs, check_library_template_changes, check_coding_standards_changes, check_paddle_config_changes, check_renovate_changes, automerge]
+    needs: [pr_info, check_dependabot_go_deps, check_dependabot_action_refs, check_library_template_changes, check_coding_standards_changes, check_paddle_config_changes, check_renovate_changes, automerge]
     runs-on: generic-2-core
     timeout-minutes: 5
     permissions:

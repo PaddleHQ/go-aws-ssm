@@ -14,6 +14,12 @@ on:
       - reopened
       - labeled
       - unlabeled
+    # gorelease can only have a verdict when Go source or the module definition
+    # changes; without one there is also no comment to refresh on label events.
+    paths:
+      - '**.go'
+      - go.mod
+      - go.sum
 
 env:
   # Required to enable support for synctest.Run
