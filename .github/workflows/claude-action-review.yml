@@ -1,0 +1,210 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+# Supply-chain review for PRs that bump third-party GitHub Actions, via the
+# shared PaddleHQ/supply-chain-action. Sibling of claude-dependency-review.yml,
+# which does the same for Go modules; this file owns only the triage policy and
+# the OTel export, the review itself lives in the action.
+#
+# Orthogonal to check-action-security.yml, which scores an action against
+# StepSecurity the FIRST time it appears and never looks again. Nothing today
+# reads what changed between two pinned SHAs - and an action runs on the runner
+# with the workflow's token, its secrets and the checked-out source, so there is
+# no sandbox and no import boundary between a bad bump and CI.
+
+name: Claude Action Security Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    # Only pin-bearing files can change a pin, so a PR touching none of them
+    # need not boot a runner. Safe to scope because this is not a required
+    # check - a required check that never runs stalls the merge queue.
+    paths:
+      - '.github/workflows/**'
+      - '**/action.yml'
+      - '**/action.yaml'
+
+permissions:
+  contents: read
+
+# Queue concurrent runs per PR so a new push waits for any in-flight review
+# instead of cancelling it.
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    name: Triage action pin changes
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    if: ${{ !github.event.pull_request.draft && vars.SUPPLY_CHAIN_REVIEW_ENABLED != 'false' }}
+
+    steps:
+      - name: Verify ANTHROPIC_API_KEY available
+        id: check-secret
+        env:
+          # The boolean, not the secret: this step only needs to know whether
+          # the key exists, so there is no reason to put it in the environment.
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          if [ "${HAS_KEY}" != "true" ]; then
+            echo "::notice::No ANTHROPIC_API_KEY org secret - action review disabled"
+            echo "should_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "should_review=true" >> "$GITHUB_OUTPUT"
+
+      - name: Classify the pin diff
+        if: steps.check-secret.outputs.should_review == 'true'
+        id: classify
+        env:
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Classify from the PR's unified diff over the API - no checkout, so
+          # the common case costs one call.
+          if ! gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" \
+            -H 'Accept: application/vnd.github.v3.diff' \
+            > "${RUNNER_TEMP}/pr.diff" 2> "${RUNNER_TEMP}/gh.err"; then
+            # An unreadable diff must not read as "no pins changed" and silently
+            # skip. Fail closed: review, and let the action decide.
+            cat "${RUNNER_TEMP}/gh.err"
+            echo "::warning::Could not read the PR diff - reviewing anyway"
+            echo "should_review=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # This gate MUST stay a strict over-approximation of the action's own
+          # parser. If it is ever narrower, a pin the runner honours slips
+          # through unreviewed and the check passes GREEN - so it matches any
+          # changed line in a workflow / action manifest mentioning `uses` OR
+          # carrying an `@`, and leaves every exclusion (local `./` refs,
+          # docker://, PaddleHQ-owned actions) to the action itself.
+          #
+          # OR, not AND: YAML lets the pin sit on the line *after* the `uses:`
+          # key, and repointing only that line leaves the key line unchanged.
+          # A false positive costs one job that finds nothing and exits.
+          HITS=$(awk '
+            /^\+\+\+ b\// {
+              path = substr($0, 7)
+              in_target = (path ~ /^\.github\/workflows\/[^\/]+\.ya?ml$/ || path ~ /(^|\/)action\.ya?ml$/)
+              next
+            }
+            !in_target { next }
+            /^[+-][^+-]/ && (tolower($0) ~ /uses/ || $0 ~ /@/) { print }
+          ' "${RUNNER_TEMP}/pr.diff" | wc -l | tr -d " ")
+
+          if [ "${HITS}" = "0" ]; then
+            echo "::notice::Triage (candidate pin lines=0) → skip: no action pin changes"
+            echo "should_review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::notice::Triage (candidate pin lines=${HITS}) → review"
+          echo "should_review=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR
+        if: steps.classify.outputs.should_review == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0          # full history for the merge-base
+          filter: blob:none       # base file contents come via the API
+          persist-credentials: false
+
+      - name: Resolve merge base
+        if: steps.classify.outputs.should_review == 'true'
+        id: merge-base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          MERGE_BASE=$(git merge-base "origin/${BASE_REF}" HEAD)
+          echo "merge_base=${MERGE_BASE}" >> "$GITHUB_OUTPUT"
+
+    outputs:
+      should_review: ${{ steps.check-secret.outputs.should_review == 'true' && steps.classify.outputs.should_review || 'false' }}
+      merge_base:    ${{ steps.merge-base.outputs.merge_base }}
+
+  review:
+    name: Supply-chain review (actions)
+    needs: triage
+    if: needs.triage.outputs.should_review == 'true'
+    runs-on: generic-2-core
+    timeout-minutes: 20
+    permissions:
+      contents:      read
+      pull-requests: write
+      id-token:      write
+      actions:       read
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - name: Supply-chain review
+        id: review
+        uses: PaddleHQ/supply-chain-action@a5054e8a9fc6a01d61d7778a0b31493289e42952 # v0.4.0
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          merge-base:        ${{ needs.triage.outputs.merge_base }}
+          ecosystem:         github-actions
+
+    # Pass the whole outputs object through as one JSON blob; the otel job
+    # turns it into claude.* attributes generically (no per-field plumbing).
+    outputs:
+      metrics: ${{ toJSON(steps.review.outputs) }}
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    # always() alone is true for a skipped dependency, so a run where nothing
+    # happened would still boot a runner to export an empty trace.
+    if: always() && needs.triage.result != 'skipped'
+    needs: [triage, review]
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions:  read
+    steps:
+      # Turn the review job's metrics JSON into `claude.<k>=<v>,...` pairs:
+      # drop empty values (absent on cache hit / skip), hyphens → underscores.
+      - name: Build claude.* resource attributes
+        id: attrs
+        # Only when the review job actually produced metrics. Skipped/failed
+        # review → empty output → nothing to attach (the export step still
+        # runs on always() to capture the workflow trace).
+        if: needs.review.outputs.metrics != ''
+        env:
+          METRICS: ${{ needs.review.outputs.metrics }}
+        run: |
+          PAIRS=$(printf '%s' "$METRICS" | jq -r '
+            to_entries
+            | map(select(.value != "" and .value != "null"))
+            | map("claude.\(.key | gsub("-"; "_"))=\(.value)")
+            | join(",")')
+          echo "pairs=claude.ecosystem=github-actions,${PAIRS}" >> "$GITHUB_OUTPUT"
+          echo "Resource attributes: ${PAIRS}"
+
+      - name: Checkout otel-export action
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # The local composite rather than step-security directly: it also tags the
+      # trace with the workflow source hash and runner image version.
+      - name: Export workflow trace
+        uses: ./.github/actions/otel-export
+        continue-on-error: true
+        with:
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          extra-attributes: ${{ steps.attrs.outputs.pairs }}
