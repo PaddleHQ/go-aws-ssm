@@ -2,10 +2,7 @@
 
 name: Check API compatibility
 
-# Runs only on pull_request: gorelease needs the PR's labels (to skip
-# release:major) and a base release tag, neither of which exist in merge_group.
-# Kept in its own workflow so label changes refresh the comment without
-# re-running the full validate suite.
+# pull_request only: the PR labels and base branch do not exist in merge_group.
 on:
   pull_request:
     types:
@@ -14,8 +11,6 @@ on:
       - reopened
       - labeled
       - unlabeled
-    # gorelease can only have a verdict when Go source or the module definition
-    # changes; without one there is also no comment to refresh on label events.
     paths:
       - '**.go'
       - go.mod
@@ -30,17 +25,17 @@ permissions:
   pull-requests: write
 
 jobs:
-  gorelease:
+  apidiff:
     name: Check API compatibility
     runs-on: go-4-core
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-          fetch-depth: 0 # fetch all history + tags to resolve the base version
+          fetch-depth: 0 # fetch all history to resolve the merge base
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -49,188 +44,149 @@ jobs:
           owner: ${{ github.repository_owner }}
           private: ${{ github.event.repository.private }}
           private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
-          cache-suffix: gorelease
-          # Keep the GitHub App token in git's credential cache so the gorelease
-          # step can fetch the base version's transitive private deps (e.g.
-          # go-rest). The repo-scoped GITHUB_TOKEN can't reach other PaddleHQ
-          # repos; the App token is owner-scoped. Dropped by "Clear git
-          # credentials" below.
+          cache-suffix: apidiff
+          # App token in git's credential cache reaches private PaddleHQ deps; GITHUB_TOKEN does not.
           clear-token: 'false'
 
       - name: Install Go tools
         uses: ./.github/actions/install-go-tools
         with:
           tools: |
-            gorelease
+            apidiff
 
-      # --
-      # API compatibility (gorelease)
-      #
-      # Checks whether the PR's release label is big enough for the API changes
-      # vs the latest release tag for this module's major version. Skipped for
-      # release:major PRs (author is knowingly breaking the API). Posts a
-      # comment; does not fail the build.
-      #
-      # We run gorelease with -version set to the version the label implies and
-      # parse its report, NOT its exit code: gorelease exits non-zero for benign
-      # diagnostics too (e.g. retracted transitive deps), so the exit code alone
-      # misreads a compatible release as a breaking change. Breaking changes come
-      # from the report's "## incompatible changes" section (populated for every
-      # major, incl. v0 which the summary verdict never flags); the label-too-low
-      # case still keys off gorelease's "minor version is not incremented" line.
-
-      - name: Run gorelease
-        id: gorelease
-        if: ${{ !contains(github.event.pull_request.labels.*.name, 'release:major') }}
-        shell: bash {0}
+      # gorelease's base-tag lookup walks the unpruned module graph and never finished in pdl; a merge-base worktree uses a pruned graph.
+      - name: Run apidiff
+        id: apidiff
+        shell: python3 {0}
         env:
           GONOSUMDB: "github.com/PaddleHQ/*"
           GOPRIVATE: "github.com/PaddleHQ/*"
+          # A committed go.work would make `go list -m` multi-line.
+          GOWORK: "off"
+          # The base's go directive can be newer than the toolchain set up for HEAD.
+          GOTOOLCHAIN: auto
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-          GORELEASE_TIMEOUT_SECONDS: "600"
+          APIDIFF_TIMEOUT_SECONDS: "600"
         run: |
-          # gorelease fetches the base version and resolves its full module
-          # graph — including transitive private deps (e.g. go-rest) — via git
-          # over HTTPS. It relies on the GitHub App token setup-go left in git's
-          # credential cache (clear-token: 'false'); that token is owner-scoped,
-          # so it can reach those cross-repo private deps. Cleared by "Clear git
-          # credentials" below.
-          # Derive which vMAJOR tags to consider from the module path. Go omits
-          # the /vN suffix for both v0 and v1 modules, so a bare path could be
-          # either: match v0.* and v1.* and let the tag list decide, or a v0
-          # module (whose only tags are v0.*) finds nothing and is skipped.
-          MODULE_PATH=$(go list -m)
-          MAJOR_SUFFIX=$(echo "$MODULE_PATH" | grep -oE '/v[0-9]+$' | grep -oE '[0-9]+')
-          if [ -n "$MAJOR_SUFFIX" ]; then
-            TAG_RE="^v${MAJOR_SUFFIX}\.[0-9]+\.[0-9]+$"
-            MAJOR_DESC="v${MAJOR_SUFFIX}"
-          else
-            TAG_RE="^v[01]\.[0-9]+\.[0-9]+$"
-            MAJOR_DESC="v0/v1"
-          fi
+          import itertools
+          import os
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
 
-          BASE_TAG=$(git tag --list --sort=-version:refname \
-            | grep -E "$TAG_RE" \
-            | head -1)
+          TIMEOUT = int(os.environ["APIDIFF_TIMEOUT_SECONDS"])
+          deadline = time.monotonic() + TIMEOUT
+          work = Path(os.environ["RUNNER_TEMP"]) / "api-compat"
+          work.mkdir(exist_ok=True)
+          base_dir = work / "base"
 
-          if [ -z "$BASE_TAG" ]; then
-            echo "No prior release tag for ${MAJOR_DESC} — skipping"
-            exit 0
-          fi
+          def run(*cmd, cwd=None):
+              try:
+                  p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=max(deadline - time.monotonic(), 0))
+              except subprocess.TimeoutExpired:
+                  return 124, "", ""
+              err = "\n".join(l for l in p.stderr.splitlines() if not l.startswith("Ignoring internal package "))
+              return p.returncode, p.stdout.strip(), err
 
-          echo "base_tag=${BASE_TAG}" >> "$GITHUB_OUTPUT"
 
-          # The base tag is a clean vMAJOR.MINOR.PATCH (filtered above). Compute
-          # the version the PR's release label implies so gorelease can judge
-          # whether that bump is sufficient (release:major is excluded by the
-          # step `if`).
-          base_semver="${BASE_TAG#v}"
-          base_major="${base_semver%%.*}"
-          base_rest="${base_semver#*.}"
-          base_minor="${base_rest%%.*}"
-          base_patch="${base_rest##*.}"
+          def output(key, value):
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"{key}={value}\n")
 
-          case ",${PR_LABELS}," in
-            *,release:patch,*)
-              # PR claims patch-only: test a patch bump so we also catch
-              # compatible additions that actually require a minor bump.
-              PROPOSED="v${base_major}.${base_minor}.$((base_patch + 1))"
-              ;;
-            *)
-              # release:minor, or no release label yet: a minor bump is valid for
-              # any compatible change, so this flags only incompatible changes.
-              PROPOSED="v${base_major}.$((base_minor + 1)).0"
-              ;;
-          esac
 
-          # gorelease refuses to run against a dirty work tree, and the
-          # setup/install steps above can leave go.mod/go.sum modified. Restore
-          # tracked files to the committed PR head so gorelease evaluates exactly
-          # what's committed.
-          git checkout -- .
+          def comment(title, body):
+              quoted = "".join(f"> {line}\n" for line in body.splitlines())
+              (work / "comment.md").write_text(f"{title}\n> ```\n{quoted}> ```\n")
+              output("comment", "true")
 
-          # Bound the run: gorelease resolves the base tag against the unpruned
-          # module graph, which takes minutes on a large tree and burns the whole
-          # job timeout when a version in it is unresolvable. A missing coreutils
-          # is a broken runner rather than a baseline problem, so fail loudly.
-          if ! command -v timeout >/dev/null 2>&1; then
-            echo "::error::timeout(1) not found; cannot bound the gorelease run."
-            exit 1
-          fi
 
-          # The API report goes to stdout, operational errors to stderr.
-          err_file="${RUNNER_TEMP:-/tmp}/gorelease.err"
-          report=$(timeout "${GORELEASE_TIMEOUT_SECONDS}" gorelease -base="${BASE_TAG}" -version="${PROPOSED}" 2>"${err_file}")
-          gorelease_status=$?
-          tool_err=$(<"${err_file}")
+          # An unloadable baseline does not prove a break, but importers have no other check, so fail.
+          def unverified(detail, err):
+              print(detail)
+              print("\n".join("  " + line for line in err.splitlines()))
+              output("fail", "true")
+              print(f"::error::Unverified: {detail} See this step's log for the full error.")
+              comment(
+                  "> [!NOTE]\n> ## :warning: API compatibility was not checked\n"
+                  f"> `apidiff` could not compare this PR against `{base_ref}`, so its API impact is unverified.",
+                  f"{detail}\n{err}",
+              )
+              sys.exit(0)
 
-          # Emit a PR comment whose body is $1 (markdown header lines) followed
-          # by $2 — defaulting to the gorelease report — in a quoted code block.
-          # The delimiter is randomised per run: the body embeds gorelease output,
-          # which can carry text from a dependency's go.mod (a retraction
-          # rationale is free-form). A fixed delimiter appearing in that text
-          # would close the heredoc early and let the rest set arbitrary outputs.
-          emit_comment() {
-            delim="GORELEASE_EOF_${RANDOM}${RANDOM}${RANDOM}"
-            {
-              echo "result<<${delim}"
-              printf '%s\n' "$1"
-              echo '> ```'
-              printf '%s\n' "${2:-${report}}" | awk '{print "> "$0}'
-              echo '> ```'
-              echo "${delim}"
-            } >> "$GITHUB_OUTPUT"
-          }
 
-          # A report with no '#' section means gorelease died before judging the
-          # API. Not keyed off stderr (a valid report can carry harmless chatter)
-          # nor the exit status (non-zero for benign diagnostics like retractions).
-          if ! printf '%s\n' "${report}" | grep -q '^#'; then
-            if [ "${gorelease_status}" -eq 124 ]; then
-              detail="gorelease exceeded ${GORELEASE_TIMEOUT_SECONDS}s against ${BASE_TAG} and was terminated."
-            else
-              detail="gorelease exited ${gorelease_status} against ${BASE_TAG} without producing a report."
-            fi
+          module_path = run("go", "list", "-m")[1]
 
-            # An unresolvable baseline is not evidence of an API break, so warn
-            # instead of failing. Comment too: the delete step below is
-            # unconditional, so a skip would otherwise erase an earlier warning.
-            # stop-commands fences the stderr dump: it can contain text from a
-            # dependency's go.mod, and a '::' line would otherwise be run as a
-            # workflow command.
-            stop_token="gorelease-stderr-${RANDOM}${RANDOM}${RANDOM}"
-            echo "::stop-commands::${stop_token}"
-            printf '%s\n' "${detail}" "${tool_err}"
-            echo "::${stop_token}::"
-            echo "::warning::Skipped: ${detail} See this step's log for the full error."
-            emit_comment "> [!NOTE]
-          > ## :warning: API compatibility was not checked
-          > \`gorelease\` could not establish a baseline against \`${BASE_TAG}\`, so this PR's API impact is unverified." "${detail}
-          ${tool_err}"
-          elif printf '%s\n' "${report}" | awk '
-              /^## incompatible changes$/ { in_section = 1; next }
-              /^#/                        { in_section = 0 }
-              in_section && NF            { found = 1 }
-              END                         { exit !found }
-            '; then
-            # Detect breaks from the report's "## incompatible changes" section
-            # rather than the summary verdict: gorelease only prints "There are
-            # incompatible changes." for v1+ modules whose proposed bump is too
-            # low. For a v0 module every version is "valid" (semver grants v0 no
-            # API guarantees), so the verdict never flags a removal; the section
-            # does. release:major is excluded above and PROPOSED is only ever a
-            # minor/patch bump, so any incompatible change means the label is
-            # insufficient regardless of major version.
-            emit_comment "> [!CAUTION]
-          > ## :rotating_light: Breaking API changes detected
-          > \`gorelease\` found incompatible changes vs \`${BASE_TAG}\`. If intentional, change the semver label to \`release:major\`."
-          elif printf '%s' "${report}" | grep -qF 'the minor version is not incremented'; then
-            emit_comment "> [!WARNING]
-          > ## :warning: Release label too low
-          > \`gorelease\` found compatible API additions vs \`${BASE_TAG}\`, but this PR is not labelled \`release:minor\`. Change the semver label to \`release:minor\`."
-          else
-            echo "Release label is sufficient for the API changes vs ${BASE_TAG}"
-          fi
+          # Services expose only pkg/. Libraries expose the whole module.
+          spec_type = run("yq", "ea", 'select(.kind == "Component") | .spec.type', "catalog-info.yaml")[1].split("\n")[0]
+          pkg_only = spec_type not in ("", "null", "library")
+          api_root = "/pkg" if pkg_only else ""
+
+          # The merge base, so a PR behind main is not blamed for main's API.
+          base_ref = run("git", "merge-base", f"origin/{os.environ['GITHUB_BASE_REF']}", "HEAD")[1][:12]
+
+          # setup/install steps can leave go.mod/go.sum modified.
+          run("git", "checkout", "--", ".")
+
+          code, _, err = run("git", "worktree", "add", "--quiet", "--detach", str(base_dir), base_ref)
+          if code:
+              unverified(f"could not check out {base_ref} into a worktree.", err)
+
+          code, base_module, err = run("go", "list", "-m", cwd=base_dir)
+          if code or not base_module:
+              unverified(f"could not read the module path at {base_ref}.", err)
+
+          if pkg_only and not (base_dir / "pkg").is_dir():
+              print(f"No pkg/ at {base_ref}, nothing to compare")
+              sys.exit(0)
+
+          if base_module != module_path:
+              report = f"Incompatible changes:\n- module path changed from {base_module} to {module_path}"
+          elif pkg_only and not Path("pkg").is_dir():
+              report = f"Incompatible changes:\n- {module_path}{api_root}: removed"
+          else:
+              # apidiff -w must run from the module root.
+              def export(name, module, cwd, what):
+                  code, _, err = run("apidiff", "-m", "-w", str(work / f"{name}.export"), module + api_root, cwd=cwd)
+                  if code == 124:
+                      unverified(f"loading {what} exceeded {TIMEOUT}s and was terminated.", err)
+                  if code:
+                      unverified(f"apidiff exited {code} loading {what}.", err)
+
+              export("base", base_module, base_dir, base_ref)
+              export("head", module_path, None, "the PR head")
+              # apidiff exits 0 whenever it produced a report, whatever it found.
+              code, report, err = run("apidiff", "-m", str(work / "base.export"), str(work / "head.export"))
+              if code:
+                  unverified(f"apidiff exited {code} comparing {base_ref} with the PR head.", err)
+
+          print(report)
+
+
+          def has_changes(header):
+              lines = report.splitlines()
+              if header not in lines:
+                  return False
+              section = itertools.takewhile(lambda line: not line.endswith(" changes:"), lines[lines.index(header) + 1:])
+              return any(line.startswith("- ") for line in section)
+
+
+          # v0 too: semver grants v0 no API guarantees, but our release labels still apply.
+          if has_changes("Incompatible changes:"):
+              output("fail", "true")
+              comment(
+                  "> [!CAUTION]\n> ## :rotating_light: Breaking API changes detected\n"
+                  f"> `apidiff` found incompatible changes vs `{base_ref}`. Other repos import this code, so this check fails until the break is removed.",
+                  report,
+              )
+          elif has_changes("Compatible changes:") and "release:patch" in os.environ["PR_LABELS"].split(","):
+              comment(
+                  "> [!WARNING]\n> ## :warning: Release label too low\n"
+                  f"> `apidiff` found compatible API changes vs `{base_ref}`, but this PR is labelled `release:patch`. Change the semver label to `release:minor`.",
+                  report,
+              )
+          else:
+              print(f"Release label is sufficient for the API changes vs {base_ref}")
 
       # Drop the App-token credential setup-go left cached (clear-token:
       # 'false'). Always runs so the token never outlives the job.
@@ -239,16 +195,23 @@ jobs:
         shell: bash
         run: git credential-cache exit || true
 
-      - name: Delete previous gorelease comment
+      # comment-tag stays gorelease; open PRs still have comments under that tag.
+      - name: Delete previous API compatibility comment
         uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: gorelease
           mode: delete
 
       - name: Comment PR with release-label issue
-        if: ${{ steps.gorelease.outputs.result != '' }}
+        if: ${{ steps.apidiff.outputs.comment == 'true' }}
         uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
         with:
           comment-tag: gorelease
           mode: upsert
-          message: ${{ steps.gorelease.outputs.result }}
+          file-path: ${{ runner.temp }}/api-compat/comment.md
+
+      - name: Fail on breaking or unverified API
+        if: ${{ steps.apidiff.outputs.fail == 'true' }}
+        run: |
+          echo "::error::See the API compatibility comment on this PR."
+          exit 1
