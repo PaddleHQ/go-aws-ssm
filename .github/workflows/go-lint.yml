@@ -6,11 +6,6 @@ on:
   merge_group:
   pull_request:
 
-env:
-  # Required to enable support for synctest.Run
-  # This will be removed once we update to go 1.25
-  GOEXPERIMENT: synctest
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true

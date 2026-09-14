@@ -8,9 +8,6 @@ on:
 
 env:
   TARGET_COVERAGE_DIFF: 5
-  # Required to enable support for synctest.Run
-  # This will be removed once we update to go 1.25
-  GOEXPERIMENT: synctest
   AWS_REGION: us-east-1
   AWS_ACCOUNT_ID: "067421297632"
   WKHTMLTOPDF_PATH: "/bin/wkhtmltopdf"
@@ -102,7 +99,7 @@ jobs:
 
       - name: Configure AWS credentials for ECR pull
         if: needs.read-config.outputs.testRunner != ''
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           audience: sts.amazonaws.com
           role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
@@ -199,7 +196,35 @@ jobs:
           report-path: test-ctrf-report.json
           pull-request-report: true
           overwrite-comment: true
+          on-fail-only: true
           comment-tag: '${{ github.workflow }}-${{ github.event.pull_request.number }}'
+
+      # on-fail-only stops the reporter posting on green, but it never deletes:
+      # a fail->pass leaves the old failure comment behind. Remove it here so a
+      # passing PR never shows a stale report. Matched by the reporter's hidden
+      # marker (see ctrf-io/github-test-reporter comment-tag handling). Cosmetic
+      # cleanup, so continue-on-error keeps a stray API hiccup from failing CI.
+      - name: Remove stale test report comment on success
+        if: success() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MARKER: '<!-- CTRF PR COMMENT TAG: ${{ github.workflow }}-${{ github.event.pull_request.number }} -->'
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          id=$(curl -sf \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/issues/${PR}/comments?per_page=100" \
+            | jq -r --arg m "${MARKER}" 'map(select(.body | contains($m))) | .[0].id // empty')
+          if [ -n "${id}" ]; then
+            curl -sf -X DELETE \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/issues/comments/${id}"
+          fi
 
       - name: Resolve generated paths
         id: generated_paths
@@ -345,7 +370,7 @@ jobs:
 
       - name: Configure AWS credentials for ECR pull
         if: needs.read-config.outputs.testRunner != ''
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           audience: sts.amazonaws.com
           role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
@@ -445,7 +470,35 @@ jobs:
           report-path: test-ctrf-report.json
           pull-request-report: true
           overwrite-comment: true
+          on-fail-only: true
           comment-tag: '${{ github.workflow }}-${{ github.event.pull_request.number }}'
+
+      # on-fail-only stops the reporter posting on green, but it never deletes:
+      # a fail->pass leaves the old failure comment behind. Remove it here so a
+      # passing PR never shows a stale report. Matched by the reporter's hidden
+      # marker (see ctrf-io/github-test-reporter comment-tag handling). Cosmetic
+      # cleanup, so continue-on-error keeps a stray API hiccup from failing CI.
+      - name: Remove stale test report comment on success
+        if: success() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MARKER: '<!-- CTRF PR COMMENT TAG: ${{ github.workflow }}-${{ github.event.pull_request.number }} -->'
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          id=$(curl -sf \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/issues/${PR}/comments?per_page=100" \
+            | jq -r --arg m "${MARKER}" 'map(select(.body | contains($m))) | .[0].id // empty')
+          if [ -n "${id}" ]; then
+            curl -sf -X DELETE \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/issues/comments/${id}"
+          fi
 
       - name: Resolve generated paths
         id: generated_paths

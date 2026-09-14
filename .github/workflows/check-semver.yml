@@ -59,7 +59,7 @@ jobs:
             core.info(`Semver Labels: ${semverLabels.join(" | ")}`);
 
             if (semverLabels.length == 0) {
-              core.setFailed("You must add a SemVer label of one of ${validLabels.join(" | ")} to this PR");
+              core.setFailed(`You must add a SemVer label of one of ${validLabels.join(" | ")} to this PR`);
             }
 
             if (semverLabels.length > 1) {
