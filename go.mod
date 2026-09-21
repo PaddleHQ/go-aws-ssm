@@ -1,6 +1,6 @@
 module github.com/PaddleHQ/go-aws-ssm
 
-go 1.24
+go 1.25
 
 require (
 	github.com/aws/aws-sdk-go v1.48.15
