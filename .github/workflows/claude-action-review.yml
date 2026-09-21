@@ -154,6 +154,10 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           merge-base:        ${{ needs.triage.outputs.merge_base }}
           ecosystem:         github-actions
+          # A BLOCK verdict should be visible as a red check, not only as a
+          # comment. This stops a human merging; it does NOT stop automerge
+          # until the check is also marked required on the branch.
+          fail-on:           block
 
     # Pass the whole outputs object through as one JSON blob; the otel job
     # turns it into claude.* attributes generically (no per-field plumbing).

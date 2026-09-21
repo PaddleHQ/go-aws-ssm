@@ -1,7 +1,7 @@
 # DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
 
 # This workflow automatically approves and merges safe pull requests created by Dependabot, or automatic PRs from
-# paddle-config and go-library-template repositories.
+# api-specifications, paddle-config and go-library-template repositories.
 
 name: Auto Approve and Merge
 
@@ -380,11 +380,21 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      # Read the opt-in flag from the merge base, not the PR tree: anyone who can
+      # push to the bot's branch could otherwise add the flag in an additions-only
+      # commit and self-approve the merge.
+      - name: "📌 Pin Build Configuration to the Merge Base"
+        env:
+          MERGE_BASE: ${{ needs.pr_info.outputs.merge_base }}
+        run: |
+          git show "${MERGE_BASE}:build-config.yaml" > "${RUNNER_TEMP}/build-config.base.yaml" \
+            || : > "${RUNNER_TEMP}/build-config.base.yaml"
+
       - name: "📖 Read Build Configuration"
         id: build_config
         uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         with:
-          config: ${{ github.workspace }}/build-config.yaml
+          config: ${{ runner.temp }}/build-config.base.yaml
 
       - name: "🔍 Analyze Paddle Config Changes"
         id: check-additions
@@ -411,6 +421,72 @@ jobs:
         with:
           pr_number: ${{ github.event.inputs.pr_number }}
           check_name: "Check Paddle Config Changes"
+          reason: ${{ steps.check-additions.outputs.reason }}
+          github_token: ${{ github.token }}
+
+    outputs:
+      can_automerge: ${{ steps.check-additions.outputs.can_automerge }}
+
+  check_api_specifications_changes:
+    name: "[Automerge/Check] 📘 Check API Specifications Changes"
+    needs:
+      - pr_info
+    runs-on: generic-2-core
+    timeout-minutes: 5
+
+    if: |-
+      needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
+      contains(needs.pr_info.outputs.labels, 'origin:api-specifications')
+
+    steps:
+      - name: "📥 Checkout PR Code"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.pr_info.outputs.head_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Read the opt-in flag from the merge base, not the PR tree: anyone who can
+      # push to the bot's branch could otherwise add the flag in an additions-only
+      # commit and self-approve the merge.
+      - name: "📌 Pin Build Configuration to the Merge Base"
+        env:
+          MERGE_BASE: ${{ needs.pr_info.outputs.merge_base }}
+        run: |
+          git show "${MERGE_BASE}:build-config.yaml" > "${RUNNER_TEMP}/build-config.base.yaml" \
+            || : > "${RUNNER_TEMP}/build-config.base.yaml"
+
+      - name: "📖 Read Build Configuration"
+        id: build_config
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
+        with:
+          config: ${{ runner.temp }}/build-config.base.yaml
+
+      - name: "🔍 Analyze API Specifications Changes"
+        id: check-additions
+        if: steps.build_config.outputs['automergeApiSpecifications'] == 'true'
+        run: |
+          echo "🔍 Checking for file deletions in api-specifications sync..."
+          # numstat, not shortstat: shortstat omits the insertions field on deletion-only
+          # diffs, shifting the deletion count into the wrong awk column ("-" sums as 0).
+          LINES_DELETED=$(git diff --numstat ${{ needs.pr_info.outputs.merge_base }} \
+            | awk '{deleted+=$2} END {print deleted+0}')
+
+          if [ "$LINES_DELETED" -gt 0 ]; then
+            REASON="Diff contains ${LINES_DELETED} deleted line(s). api-specifications sync PRs are only auto-merged when changes are additions/modifications only."
+            echo "⚠️ ${REASON}"
+            echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+          else
+            echo "✅ No lines deleted (only additions/modifications) - automerge enabled"
+            echo "can_automerge=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: "💬 Manage Automerge Status Comment"
+        if: steps.build_config.outputs['automergeApiSpecifications'] == 'true'
+        uses: ./.github/actions/automerge-skipped-comment
+        with:
+          pr_number: ${{ github.event.inputs.pr_number }}
+          check_name: "Check API Specifications Changes"
           reason: ${{ steps.check-additions.outputs.reason }}
           github_token: ${{ github.token }}
 
@@ -486,6 +562,7 @@ jobs:
       - check_library_template_changes
       - check_coding_standards_changes
       - check_paddle_config_changes
+      - check_api_specifications_changes
       - check_renovate_changes
 
     # Run if any of the check jobs approved automerge
@@ -501,6 +578,7 @@ jobs:
         needs.check_library_template_changes.outputs.can_automerge == 'true' ||
         needs.check_coding_standards_changes.outputs.can_automerge == 'true' ||
         needs.check_paddle_config_changes.outputs.can_automerge == 'true' ||
+        needs.check_api_specifications_changes.outputs.can_automerge == 'true' ||
         needs.check_renovate_changes.outputs.can_automerge == 'true'
       )
 
@@ -510,13 +588,24 @@ jobs:
         with:
           ref: ${{ needs.pr_info.outputs.head_sha }}
           persist-credentials: false
+          fetch-depth: 0
+
+      # Read the approve/merge switches from the merge base, not the PR tree: anyone
+      # who can push to the bot's branch could otherwise turn them on in an
+      # additions-only commit and self-approve the merge.
+      - name: "📌 Pin Build Configuration to the Merge Base"
+        env:
+          MERGE_BASE: ${{ needs.pr_info.outputs.merge_base }}
+        run: |
+          git show "${MERGE_BASE}:build-config.yaml" > "${RUNNER_TEMP}/build-config.base.yaml" \
+            || : > "${RUNNER_TEMP}/build-config.base.yaml"
 
       - name: "📖 Read Build Configuration"
         id: build_config
         uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
         continue-on-error: true
         with:
-          config: ${{ github.workspace }}/build-config.yaml
+          config: ${{ runner.temp }}/build-config.base.yaml
 
       - name: "🔑 Generate GitHub App Token"
         id: generate-token
@@ -574,7 +663,7 @@ jobs:
   otel_cicd_export:
     name: OpenTelemetry Export Trace
     if: ${{ !cancelled() }}
-    needs: [pr_info, check_dependabot_go_deps, check_dependabot_action_refs, check_library_template_changes, check_coding_standards_changes, check_paddle_config_changes, check_renovate_changes, automerge]
+    needs: [pr_info, check_dependabot_go_deps, check_dependabot_action_refs, check_library_template_changes, check_coding_standards_changes, check_paddle_config_changes, check_api_specifications_changes, check_renovate_changes, automerge]
     runs-on: generic-2-core
     timeout-minutes: 5
     permissions:

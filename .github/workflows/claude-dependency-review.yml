@@ -189,7 +189,7 @@ jobs:
           echo "Resource attributes: ${PAIRS}"
 
       - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        uses: step-security/otel-cicd-action@a6fe4097089c123f94c2e3ccd8d987b90cd07747 # v4.1.1
         continue-on-error: true
         with:
           otlpEndpoint:    grpc://api.honeycomb.io:443/
