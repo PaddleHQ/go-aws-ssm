@@ -112,6 +112,10 @@ linters:
     gosec:
       excludes:
         - G115
+        ## Its cancel-func check misses calls made from a closure, a spawned
+        ## goroutine, or returned to a deferring caller: 9 of 9 verified false
+        ## positives across the estate.
+        - G118
     lll:
       line-length: 140
     misspell:
