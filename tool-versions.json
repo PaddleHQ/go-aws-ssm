@@ -30,7 +30,7 @@
 			"package": "github.com/ctrf-io/go-ctrf-json-reporter/cmd/go-ctrf-json-reporter"
 		},
 		"apidiff": {
-			"version": "v0.0.0-20260820122028-d6e0b57b1a69",
+			"version": "v0.0.0-20260908205506-85c1c2202aba",
 			"package": "golang.org/x/exp/cmd/apidiff"
 		}
 	}
