@@ -8,14 +8,24 @@ description: |
 
 inputs:
   honeycomb-team:
-    description: Honeycomb API key. Pass `${{ secrets.HONEYCOMB_GHA_SECRET }}` — secrets cannot be read directly inside composite actions.
+    description: "Honeycomb API key. Pass secrets.HONEYCOMB_GHA_SECRET — secrets cannot be read directly inside composite actions."
     required: true
+  honeycomb-dataset:
+    description: "Honeycomb dataset name. Pass vars.HONEYCOMB_GHA_DATASET — vars cannot be read directly inside composite actions."
+    required: true
+  github-token:
+    description: "GitHub token for API calls. Pass secrets.GITHUB_TOKEN."
+    required: true
+  extra-attributes:
+    description: "Optional extra OTel resource attributes to append, comma-separated key=value (e.g. service.name=my-workflow-e2e)."
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
     - name: Checkout workflow file
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         sparse-checkout: .github/workflows
         sparse-checkout-cone-mode: false
@@ -40,6 +50,6 @@ runs:
       continue-on-error: true
       with:
         otlpEndpoint: grpc://api.honeycomb.io:443/
-        otlpHeaders: "x-honeycomb-team=${{ inputs.honeycomb-team }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-        githubToken: ${{ github.token }}
-        customAttributes: '{"workflow.source.hash":"${{ steps.wfhash.outputs.hash }}","runner.image.version":"${{ steps.image.outputs.version }}"}'
+        otlpHeaders: "x-honeycomb-team=${{ inputs.honeycomb-team }},x-honeycomb-dataset=${{ inputs.honeycomb-dataset }}"
+        githubToken: ${{ inputs.github-token }}
+        extraAttributes: "workflow.source.hash=${{ steps.wfhash.outputs.hash }},runner.image.version=${{ steps.image.outputs.version }}${{ inputs.extra-attributes != '' && format(',{0}', inputs.extra-attributes) || '' }}"

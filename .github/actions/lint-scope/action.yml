@@ -1,0 +1,74 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Determine lint scope
+description: |
+  Compute which Go packages to lint and whether to lint at all, based on
+  the diff against the PR's base ref. Three outcomes:
+
+  - lint config changed → `skip=false`, `pkgs=./...`, `new_from_rev` empty
+    (full-codebase lint so any new rules are enforced repo-wide).
+  - one or more `*.go` files changed → `skip=false`, `pkgs` is the unique
+    list of touched directories, `new_from_rev=--new-from-rev=<base>` so
+    golangci-lint reports only issues new to the diff.
+  - neither → `skip=true`. The caller should gate the lint step on
+    `steps.<id>.outputs.skip != 'true'`; running golangci-lint here would
+    default to `./...` and analyse the whole codebase, but `--new-from-rev`
+    would filter every report out, so it'd be pure waste.
+
+  The caller passes a `config-glob` regex matching the lint-config files
+  that should trigger a full-repo lint. Main lint passes the default
+  matching only `.golangci.{yml,yaml}`; experimental lint passes a wider
+  pattern that also matches `.golangci.experimental.{yml,yaml}` because
+  experimental inherits from the main config.
+
+inputs:
+  base-sha:
+    description: SHA of the PR base ref to diff against.
+    required: true
+  config-glob:
+    description: Regex (extended) matching the lint-config file(s) whose change should trigger a full repo lint.
+    default: '(^|/)\.golangci\.(yml|yaml)$'
+    required: false
+
+outputs:
+  skip:
+    description: '"true" if nothing should be linted (no .go files and no config change). Caller should gate the lint step on this.'
+    value: ${{ steps.scope.outputs.skip }}
+  pkgs:
+    description: Space-separated list of packages (or `./...`) to pass to golangci-lint. Empty if `skip` is true.
+    value: ${{ steps.scope.outputs.pkgs }}
+  new-from-rev:
+    description: '`--new-from-rev=<sha>` argument or empty. Pass through to golangci-lint args.'
+    value: ${{ steps.scope.outputs.new_from_rev }}
+
+runs:
+  using: composite
+  steps:
+    - id: scope
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+        CONFIG_GLOB: ${{ inputs.config-glob }}
+      run: |
+        if git diff --name-only "$BASE_SHA"..HEAD | grep -qE "$CONFIG_GLOB"; then
+          {
+            echo "skip=false"
+            echo "pkgs=./..."
+            echo "new_from_rev="
+          } >> "$GITHUB_OUTPUT"
+        else
+          pkgs=$(git diff --name-only --diff-filter=d "$BASE_SHA"..HEAD -- '*.go' \
+            | xargs -I{} dirname {} \
+            | sort -u \
+            | sed 's|^|./|' \
+            | tr '\n' ' ')
+          if [ -z "$pkgs" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "skip=false"
+              echo "pkgs=$pkgs"
+              echo "new_from_rev=--new-from-rev=$BASE_SHA"
+            } >> "$GITHUB_OUTPUT"
+          fi
+        fi
