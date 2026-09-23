@@ -12,16 +12,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.check_run.head_sha }}
   cancel-in-progress: true
 
-permissions:
-  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
-  contents: read
-  pull-requests: read
+permissions: {}
 
 jobs:
   trigger_workflows_after_checks_complete:
     name: Trigger workflows after Checks complete
     runs-on: generic-2-core
     timeout-minutes: 30
+    permissions:
+      actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,10 +34,12 @@ jobs:
         id: get_pr
         env:
           GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.check_run.head_sha }}
         run: |
           # Treat an empty or failed PR lookup the same as "no PR": default to
           # `{}` so the downstream `event` payload stays valid JSON.
-          PR_DATA=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.check_run.head_sha }}/pulls" --jq '.[0] // empty' || true)
+          PR_DATA=$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/pulls" --jq '.[0] // empty' || true)
           if [ -z "$PR_DATA" ] || [ "$PR_DATA" = "null" ]; then
             echo "No pull request found for this commit"
             echo "pr_data={}" >> "$GITHUB_OUTPUT"

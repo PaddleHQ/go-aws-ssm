@@ -20,10 +20,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.inputs.pr_number }}
   cancel-in-progress: true
 
-permissions:
-  checks: read
-  contents: read
-  pull-requests: write
+permissions: {}
 
 jobs:
   # --
@@ -33,6 +30,9 @@ jobs:
     name: "Get PR Info"
     runs-on: generic-2-core
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
 
     steps:
       - name: Check sender
@@ -53,8 +53,9 @@ jobs:
         id: pr-info
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
         run: |
-          PR=$(gh pr view ${{ github.event.inputs.pr_number }} --json isDraft,author,labels,headRefOid,baseRefName,state)
+          PR=$(gh pr view "${PR_NUMBER}" --json isDraft,author,labels,headRefOid,baseRefName,state)
 
           {
             echo "state=$(echo "${PR}" | jq -r '.state')"
@@ -127,6 +128,9 @@ jobs:
       - pr_info
     runs-on: generic-2-core
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
 
     if: |-
       needs.pr_info.outputs.user_login == 'app/dependabot'
@@ -178,6 +182,9 @@ jobs:
       - pr_info
     runs-on: generic-2-core
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
 
     if: |-
       needs.pr_info.outputs.user_login == 'app/dependabot'
@@ -254,6 +261,9 @@ jobs:
       - pr_info
     runs-on: generic-2-core
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
 
     if: |-
       needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
@@ -313,6 +323,9 @@ jobs:
       - pr_info
     runs-on: generic-2-core
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
 
     if: |-
       needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
@@ -367,6 +380,9 @@ jobs:
       - pr_info
     runs-on: generic-2-core
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
 
     if: |-
       needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
@@ -433,6 +449,9 @@ jobs:
       - pr_info
     runs-on: generic-2-core
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
 
     if: |-
       needs.pr_info.outputs.user_login == 'app/paddle-repo-file-sync' &&
@@ -499,6 +518,9 @@ jobs:
       - pr_info
     runs-on: generic-2-core
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
 
     if: |-
       needs.pr_info.outputs.user_login == 'app/paddle-renovate' &&
@@ -554,6 +576,9 @@ jobs:
     name: "[Automerge/Merge] 🚀 Auto Approve and Merge"
     runs-on: generic-2-core
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
 
     needs:
       - pr_info
@@ -613,6 +638,10 @@ jobs:
         with:
           app-id: 1045853
           private-key: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}
+          # Approving and squash-merging; without these the token inherits every
+          # permission the app installation holds.
+          permission-contents: write
+          permission-pull-requests: write
 
       # Read at the point of action: the state `pr_info` saw is minutes old by the
       # time the gates finish, and approving or merging a closed PR errors.
@@ -620,17 +649,19 @@ jobs:
         id: still-open
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
         run: |
-          STATE=$(gh pr view "${{ github.event.inputs.pr_number }}" --json state --jq '.state')
+          STATE=$(gh pr view "${PR_NUMBER}" --json state --jq '.state')
           echo "PR is ${STATE}"
           echo "state=${STATE}" >> "$GITHUB_OUTPUT"
 
       - name: "✅ Auto Approve PR"
         if: steps.build_config.outputs['approveBotEnabled'] == 'true' &&
           steps.still-open.outputs.state == 'OPEN'
-        run: gh pr review --approve "${{ github.event.inputs.pr_number }}"
+        run: gh pr review --approve "${PR_NUMBER}"
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
 
       - name: "🔀 Auto Merge PR"
         if: steps.build_config.outputs['mergeBotEnabled'] == 'true' &&
@@ -639,14 +670,17 @@ jobs:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           # The app token can't read branch rules; reads use the workflow token.
           READ_GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.inputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          PR="${{ github.event.inputs.pr_number }}"
+          PR="${PR_NUMBER}"
 
           # Merge-queue repos: arm native auto-merge and let the queue complete the
           # merge (entering it honours the app's ruleset bypass). A failed lookup
           # takes this path too, so the fail-safe is today's behaviour.
           QUEUE_RULES=$(GH_TOKEN="${READ_GH_TOKEN}" gh api \
-            "repos/${{ github.repository }}/rules/branches/${{ github.event.repository.default_branch }}" \
+            "repos/${REPOSITORY}/rules/branches/${DEFAULT_BRANCH}" \
             --jq '[.[] | select(.type == "merge_queue")] | length' 2>/dev/null || echo "unknown")
           if [ "${QUEUE_RULES}" != "0" ]; then
             gh pr merge --auto --squash "$PR"

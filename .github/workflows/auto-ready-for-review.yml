@@ -53,21 +53,16 @@ jobs:
       ok: ${{ steps.gate.outputs.ok }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.head_sha }}
-          persist-credentials: false
-
       - name: "🧠 Check label:auto-ready-for-review is present and draft status is true"
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr_number }}
         shell: bash
         run: |
             set -euo pipefail
-            pr_json="$(gh pr view "$PR_NUMBER" --json isDraft,labels)"
+            pr_json="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json isDraft,labels)"
             is_draft="$(echo "$pr_json" | jq -r '.isDraft')"
             has_label="$(echo "$pr_json" | jq -r '.labels | map(.name) | index("auto-ready-for-review") | if . == null then "false" else "true" end')"
 
@@ -155,6 +150,8 @@ jobs:
         with:
           app-id: 1045853
           private-key: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY }}
+          # The token only runs `gh pr ready`; without this it inherits every permission the app installation holds.
+          permission-pull-requests: write
 
       - name: "🔄 Mark PR ready for review" # github.token doesn't have permission to mark PR ready for review :(
         env:
