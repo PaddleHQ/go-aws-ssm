@@ -9,6 +9,10 @@ run:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  # Report every issue in a changed file, not only issues on changed lines, so whole-function
+  # linters (gocognit/gocyclo/cyclop/funlen) that anchor at the func declaration aren't missed
+  # when a body-only edit raises complexity. No-op unless --new-from-rev/--new-from-patch is set.
+  whole-files: true
 formatters:
   enable:
     - gci
@@ -108,6 +112,10 @@ linters:
     gosec:
       excludes:
         - G115
+        ## Its cancel-func check misses calls made from a closure, a spawned
+        ## goroutine, or returned to a deferring caller: 9 of 9 verified false
+        ## positives across the estate.
+        - G118
     lll:
       line-length: 140
     misspell:
