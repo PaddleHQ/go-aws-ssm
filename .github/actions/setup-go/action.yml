@@ -44,6 +44,10 @@ inputs:
       runs. Pass 'race' from the race job; leave empty for everything else.
     default: ''
     required: false
+  working-directory:
+    description: Directory containing go.mod, relative to the repository root.
+    default: '.'
+    required: false
 
 outputs:
   go-mod-version:
@@ -56,6 +60,8 @@ runs:
     - name: Extract Go version
       uses: arnested/go-version-action@6a9d1e0bcc9db5b1693bb7b0ad37491d205f67b6 # v2.1.4
       id: go-version
+      with:
+        working-directory: ${{ inputs.working-directory }}
 
     # For libraries then we use the latest patch version of the minor go version.
     # This should not be used for services.
@@ -110,6 +116,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       env:
         GOPRIVATE: github.com/PaddleHQ/*
       run: |
