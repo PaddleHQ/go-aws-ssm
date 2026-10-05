@@ -22,6 +22,19 @@ updates:
       otel:
         patterns:
           - "go.opentelemetry.io/otel/*"
-      otelcontrib-do-not-merge:
+      otelcontrib:
         patterns:
           - "go.opentelemetry.io/contrib/*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+    labels:
+      - "norelease"
+    cooldown:
+      # Longer than the go-library-template's own 7-day cooldown so its action bumps merge
+      # and sync down first; libraries only open their own PR as a fallback.
+      default-days: 14

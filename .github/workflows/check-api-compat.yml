@@ -1,0 +1,217 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Check API compatibility
+
+# pull_request only: the PR labels and base branch do not exist in merge_group.
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+    paths:
+      - '**.go'
+      - go.mod
+      - go.sum
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  apidiff:
+    name: Check API compatibility
+    runs-on: go-4-core
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0 # fetch all history to resolve the merge base
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        id: setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: apidiff
+          # App token in git's credential cache reaches private PaddleHQ deps; GITHUB_TOKEN does not.
+          clear-token: 'false'
+
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
+        with:
+          tools: |
+            apidiff
+
+      # gorelease's base-tag lookup walks the unpruned module graph and never finished in pdl; a merge-base worktree uses a pruned graph.
+      - name: Run apidiff
+        id: apidiff
+        shell: python3 {0}
+        env:
+          GONOSUMDB: "github.com/PaddleHQ/*"
+          GOPRIVATE: "github.com/PaddleHQ/*"
+          # A committed go.work would make `go list -m` multi-line.
+          GOWORK: "off"
+          # The base's go directive can be newer than the toolchain set up for HEAD.
+          GOTOOLCHAIN: auto
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          APIDIFF_TIMEOUT_SECONDS: "600"
+        run: |
+          import itertools
+          import os
+          import subprocess
+          import sys
+          import time
+          from pathlib import Path
+
+          TIMEOUT = int(os.environ["APIDIFF_TIMEOUT_SECONDS"])
+          deadline = time.monotonic() + TIMEOUT
+          work = Path(os.environ["RUNNER_TEMP"]) / "api-compat"
+          work.mkdir(exist_ok=True)
+          base_dir = work / "base"
+
+          def run(*cmd, cwd=None):
+              try:
+                  p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=max(deadline - time.monotonic(), 0))
+              except subprocess.TimeoutExpired:
+                  return 124, "", ""
+              err = "\n".join(l for l in p.stderr.splitlines() if not l.startswith("Ignoring internal package "))
+              return p.returncode, p.stdout.strip(), err
+
+
+          def output(key, value):
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"{key}={value}\n")
+
+
+          def comment(title, body):
+              quoted = "".join(f"> {line}\n" for line in body.splitlines())
+              (work / "comment.md").write_text(f"{title}\n> ```\n{quoted}> ```\n")
+              output("comment", "true")
+
+
+          # An unloadable baseline does not prove a break, but importers have no other check, so fail.
+          def unverified(detail, err):
+              print(detail)
+              print("\n".join("  " + line for line in err.splitlines()))
+              output("fail", "true")
+              print(f"::error::Unverified: {detail} See this step's log for the full error.")
+              comment(
+                  "> [!NOTE]\n> ## :warning: API compatibility was not checked\n"
+                  f"> `apidiff` could not compare this PR against `{base_ref}`, so its API impact is unverified.",
+                  f"{detail}\n{err}",
+              )
+              sys.exit(0)
+
+
+          module_path = run("go", "list", "-m")[1]
+
+          # Services expose only pkg/. Libraries expose the whole module.
+          spec_type = run("yq", "ea", 'select(.kind == "Component") | .spec.type', "catalog-info.yaml")[1].split("\n")[0]
+          pkg_only = spec_type not in ("", "null", "library")
+          api_root = "/pkg" if pkg_only else ""
+
+          # The merge base, so a PR behind main is not blamed for main's API.
+          base_ref = run("git", "merge-base", f"origin/{os.environ['GITHUB_BASE_REF']}", "HEAD")[1][:12]
+
+          # setup/install steps can leave go.mod/go.sum modified.
+          run("git", "checkout", "--", ".")
+
+          code, _, err = run("git", "worktree", "add", "--quiet", "--detach", str(base_dir), base_ref)
+          if code:
+              unverified(f"could not check out {base_ref} into a worktree.", err)
+
+          code, base_module, err = run("go", "list", "-m", cwd=base_dir)
+          if code or not base_module:
+              unverified(f"could not read the module path at {base_ref}.", err)
+
+          if pkg_only and not (base_dir / "pkg").is_dir():
+              print(f"No pkg/ at {base_ref}, nothing to compare")
+              sys.exit(0)
+
+          if base_module != module_path:
+              report = f"Incompatible changes:\n- module path changed from {base_module} to {module_path}"
+          elif pkg_only and not Path("pkg").is_dir():
+              report = f"Incompatible changes:\n- {module_path}{api_root}: removed"
+          else:
+              # apidiff -w must run from the module root.
+              def export(name, module, cwd, what):
+                  code, _, err = run("apidiff", "-m", "-w", str(work / f"{name}.export"), module + api_root, cwd=cwd)
+                  if code == 124:
+                      unverified(f"loading {what} exceeded {TIMEOUT}s and was terminated.", err)
+                  if code:
+                      unverified(f"apidiff exited {code} loading {what}.", err)
+
+              export("base", base_module, base_dir, base_ref)
+              export("head", module_path, None, "the PR head")
+              # apidiff exits 0 whenever it produced a report, whatever it found.
+              code, report, err = run("apidiff", "-m", str(work / "base.export"), str(work / "head.export"))
+              if code:
+                  unverified(f"apidiff exited {code} comparing {base_ref} with the PR head.", err)
+
+          print(report)
+
+
+          def has_changes(header):
+              lines = report.splitlines()
+              if header not in lines:
+                  return False
+              section = itertools.takewhile(lambda line: not line.endswith(" changes:"), lines[lines.index(header) + 1:])
+              return any(line.startswith("- ") for line in section)
+
+
+          # v0 too: semver grants v0 no API guarantees, but our release labels still apply.
+          if has_changes("Incompatible changes:"):
+              output("fail", "true")
+              comment(
+                  "> [!CAUTION]\n> ## :rotating_light: Breaking API changes detected\n"
+                  f"> `apidiff` found incompatible changes vs `{base_ref}`. Other repos import this code, so this check fails until the break is removed.",
+                  report,
+              )
+          elif has_changes("Compatible changes:") and "release:patch" in os.environ["PR_LABELS"].split(","):
+              comment(
+                  "> [!WARNING]\n> ## :warning: Release label too low\n"
+                  f"> `apidiff` found compatible API changes vs `{base_ref}`, but this PR is labelled `release:patch`. Change the semver label to `release:minor`.",
+                  report,
+              )
+          else:
+              print(f"Release label is sufficient for the API changes vs {base_ref}")
+
+      # Drop the App-token credential setup-go left cached (clear-token:
+      # 'false'). Always runs so the token never outlives the job.
+      - name: Clear git credentials
+        if: always()
+        shell: bash
+        run: git credential-cache exit || true
+
+      # comment-tag stays gorelease; open PRs still have comments under that tag.
+      - name: Delete previous API compatibility comment
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: gorelease
+          mode: delete
+
+      - name: Comment PR with release-label issue
+        if: ${{ steps.apidiff.outputs.comment == 'true' }}
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: gorelease
+          mode: upsert
+          file-path: ${{ runner.temp }}/api-compat/comment.md
+
+      - name: Fail on breaking or unverified API
+        if: ${{ steps.apidiff.outputs.fail == 'true' }}
+        run: |
+          echo "::error::See the API compatibility comment on this PR."
+          exit 1

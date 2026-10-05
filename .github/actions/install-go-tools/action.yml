@@ -1,0 +1,48 @@
+name: Install Go tools
+description: |
+  For each requested tool, prepend the baked /opt/runner-tools/<name>/<version>
+  dir to $GITHUB_PATH so consumers use the version baked into the custom runner
+  image. Falls back to `go install` if the baked path is missing (stock runner,
+  or pre-rollout). Versions come from tool-versions.json — synced across repos
+  by paddle-config.
+
+inputs:
+  tools:
+    description: |
+      Whitespace-separated list of tool names. Each must have an entry in
+      tool-versions.json. Example:
+        tools: |
+          govulncheck
+          modernize
+    required: true
+  tool-versions:
+    description: Path to tool-versions.json (relative to the workspace).
+    required: false
+    default: tool-versions.json
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        TOOLS: ${{ inputs.tools }}
+        TOOL_VERSIONS: ${{ inputs.tool-versions }}
+      run: |
+        set -euo pipefail
+        for name in $TOOLS; do
+          entry=$(jq -r --arg n "$name" '.tools[$n] // empty' "$TOOL_VERSIONS")
+          if [ -z "$entry" ]; then
+            echo "::error::tool '${name}' not found in ${TOOL_VERSIONS}"
+            exit 1
+          fi
+          version=$(jq -r '.version' <<< "$entry")
+          package=$(jq -r '.package' <<< "$entry")
+          baked="/opt/runner-tools/${name}/${version}"
+          if [ -x "${baked}/${name}" ]; then
+            echo "${baked}" >> "$GITHUB_PATH"
+            echo "  ${name}@${version} → baked"
+          else
+            echo "  ${name}@${version} not baked, running go install"
+            go install "${package}@${version}"
+          fi
+        done

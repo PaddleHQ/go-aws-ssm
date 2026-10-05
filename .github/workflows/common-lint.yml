@@ -19,29 +19,24 @@ permissions:
 jobs:
   common-lint:
     name: Ensure code passes generic linting rules
-    runs-on: ubuntu-latest
+    runs-on: generic-2-core
+    timeout-minutes: 10
     steps:
-      - name: Harden the runner
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          use-policy-store: true
-          api-key: ${{ secrets.STEPSECURITY_POLICY_STORE_API_KEY }}
-
       - name: Check out code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           persist-credentials: true # Required so that reviewdog can fallback to git command
 
       - name: Lint github actions
-        uses: step-security/action-actionlint@c3aa382d371c6b05513ae5907d4f77713e21813c # v1.72.0
+        uses: step-security/action-actionlint@b90a9ddb65b752bc6b6888a2f30a4941d9ff62e5 # v1.73.1
         with:
           reporter: github-pr-review
           filter_mode: nofilter
           fail_level: 'any'
 
       - name: Install editorconfig-checker
-        uses: editorconfig-checker/action-editorconfig-checker@840e866d93b8e032123c23bac69dece044d4d84c # v2.2.0
+        uses: editorconfig-checker/action-editorconfig-checker@51f63319f592f97930c73d9c46184d20bd206393 # v3.0.0
         with:
           version: v3.4.1
 
@@ -56,23 +51,27 @@ jobs:
 
   otel_cicd_export:
     name: OpenTelemetry Export Trace
-    if: always()
+    if: always() && needs['common-lint'].result != 'skipped'
     needs: [common-lint]
-    runs-on: ubuntu-latest
+    runs-on: generic-2-core
+    timeout-minutes: 5
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Harden the runner
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          use-policy-store: true
-          api-key: ${{ secrets.STEPSECURITY_POLICY_STORE_API_KEY }}
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
+        if: always()
+        uses: ./.github/actions/otel-export
         continue-on-error: true
         with:
-          otlpEndpoint: grpc://api.honeycomb.io:443/
-          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
