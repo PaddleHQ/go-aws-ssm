@@ -124,10 +124,23 @@ linters:
         - localised
         - catalogue
         - authorised
+    revive:
+      enable-default-rules: true
+      rules:
+        ## Each spelling of a telemetry.Annotate key is its own Honeycomb column, so literal keys must use the
+        ## registry's dotted form. Constant keys are checked by the go-semconv naming tests instead.
+        - name: string-format
+          arguments:
+            - - >-
+                telemetry.String[0], telemetry.Bool[0], telemetry.Int[0], telemetry.Int64[0], telemetry.Float64[0], telemetry.StringSlice[0], telemetry.BoolSlice[0], telemetry.IntSlice[0], telemetry.Int64Slice[0], telemetry.Float64Slice[0]
+              - /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/
+              - telemetry keys must be dotted lowercase, e.g. "seller.id"; prefer a go-semconv constant
+            - - telemetry.TimeAttr[1]
+              - /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/
+              - TimeAttr prefixes must be dotted lowercase or snake_case, e.g. "scope_check"
     sloglint:
       context: all
       static-msg: true
-      key-naming-case: kebab
     staticcheck:
       checks:
         - all
@@ -162,6 +175,10 @@ linters:
           - lll
           - nestif
         path: _test\.go
+      - linters:
+          - revive
+        path: _test\.go
+        text: "string-format: (telemetry keys|TimeAttr prefixes)"
       - linters:
           - nilnil
           - wrapcheck
