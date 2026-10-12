@@ -17,9 +17,9 @@ description: |
 
   The caller passes a `config-glob` regex matching the lint-config files
   that should trigger a full-repo lint. Main lint passes the default
-  matching only `.golangci.{yml,yaml}`; experimental lint passes a wider
-  pattern that also matches `.golangci.experimental.{yml,yaml}` because
-  experimental inherits from the main config.
+  matching only `.golangci.{yml,yaml}`; experimental lint passes a pattern
+  matching only `.golangci.experimental.{yml,yaml}`, because that config is
+  a standalone delta linted on its own, not layered on `.golangci.yml`.
 
 inputs:
   base-sha:
