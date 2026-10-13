@@ -91,6 +91,7 @@ linters:
     - usetesting
     - wastedassign
     - whitespace
+    - modernize
     - nilnil
     - wrapcheck
   settings:
