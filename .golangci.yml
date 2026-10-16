@@ -93,6 +93,7 @@ linters:
     - whitespace
     - modernize
     - nilnil
+    - usetesting
     - wrapcheck
   settings:
     exhaustive:
@@ -154,6 +155,11 @@ linters:
     testifylint:
       disable:
         - require-error
+    usetesting:
+      ## --fix rewrites t.Cleanup closures to t.Context(), which is already cancelled there;
+      ## use context.WithoutCancel(t.Context()) or //nolint:usetesting instead.
+      context-background: true
+      context-todo: true
     wrapcheck:
       ignore-package-globs:
         - github.com/PaddleHQ/*
