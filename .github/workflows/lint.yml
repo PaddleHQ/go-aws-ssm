@@ -1,0 +1,58 @@
+# DO NOT EDIT: This file should only be modified in the `go-public-library-template` repo.
+
+name: Ensure code passes linting rules
+
+on:
+  merge_group:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Ensure code passes linting rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            dl.google.com:443
+            github.com:443
+            go.dev:443
+            proxy.golang.org:443
+            release-assets.githubusercontent.com:443
+            storage.googleapis.com:443
+            sum.golang.org:443
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the merge base is needed to lint only new issues
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+
+      - name: Resolve merge base
+        id: base
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.merge_group.base_ref }}
+        run: echo "sha=$(git merge-base "origin/${BASE_REF#refs/heads/}" HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Only issues introduced since the merge base fail the check, so existing code doesn't block unrelated PRs.
+      - name: golangci-lint
+        uses: step-security/golangci-lint-action@2697867e9c204558ca23d0decdd0039dc21f2b93 # v9.3.0
+        with:
+          version: v2.11.0
+          args: --new-from-rev=${{ steps.base.outputs.sha }}
+          # Verifying the config downloads its JSON schema, which the egress allowlist blocks.
+          verify: false
