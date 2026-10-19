@@ -1,101 +1,50 @@
-# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+# DO NOT EDIT: This file should only be modified in the `go-public-library-template` repo.
 
 name: Ensure SemVer Label is added
 
 on:
   merge_group:
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
-      - unlabeled
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
-  issues: read
-  pull-requests: read
-  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
-
-env:
-  VALID_SEMVER_LABELS: norelease,release:major,release:minor,release:patch
 
 jobs:
   check_semver:
     name: Ensure SemVer Label is added
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
     steps:
       - name: Harden the runner
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          use-policy-store: true
-          api-key: ${{ secrets.STEPSECURITY_POLICY_STORE_API_KEY }}
+          egress-policy: block
+          # The job makes no outbound calls. One host is listed because an empty allowlist configures no rules at all.
+          allowed-endpoints: >
+            github.com:443
 
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
-          persist-credentials: false
+      - name: Require exactly one SemVer label
+        # The label is checked on the PR; the merge queue re-runs the same commit.
+        if: github.event_name == 'pull_request'
+        env:
+          VALID_LABELS: norelease release:major release:minor release:patch
+        run: |
+          found=$(jq -r --arg valid "$VALID_LABELS" \
+            '[.pull_request.labels[].name | select(. as $l | $valid | split(" ") | index($l))] | join(" ")' \
+            "$GITHUB_EVENT_PATH")
+          count=$(wc -w <<< "$found")
 
-      - name: Read build config
-        id: build_config
-        uses: step-security/action-read-yaml@08f859a2769067ea7fd26c1cd03a9b940c0ac01b # v1.0.0
-        with:
-          config: ${{ github.workspace }}/build-config.yaml
-
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        if: steps.build_config.outputs['semanticReleases'] != 'false'
-        with:
-          script: |
-            const validLabels = process.env.VALID_SEMVER_LABELS.split(",");
-            const { data: labelResultList } = await github.rest.issues.listLabelsOnIssue({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            const prLabels = labelResultList.map(label => label.name);
-            const semverLabels = prLabels.filter(value => validLabels.includes(value));
-
-            core.info(`Valid labels: ${validLabels.join(" | ")}`);
-            core.info(`PR labels: ${prLabels.join(" | ")}`);
-            core.info(`Semver Labels: ${semverLabels.join(" | ")}`);
-
-            if (semverLabels.length == 0) {
-              core.setFailed("You must add a SemVer label of one of ${validLabels.join(" | ")} to this PR");
-            }
-
-            if (semverLabels.length > 1) {
-              core.setFailed("You must only add one SemVer label to this PR");
-            }
-
-      - name: Automerge
-        uses: ./.github/actions/trigger-automerge
-        with:
-          event: ${{ toJSON(github.event) }}
-          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
-
-  otel_cicd_export:
-    name: OpenTelemetry Export Trace
-    if: always()
-    needs: [check_semver]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-    steps:
-      - name: Harden the runner
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
-        with:
-          use-policy-store: true
-          api-key: ${{ secrets.STEPSECURITY_POLICY_STORE_API_KEY }}
-
-      - name: Export workflow trace
-        uses: step-security/otel-cicd-action@867b2182ace9682deea2e7c31712596e02e72644 # v4.0.1
-        continue-on-error: true
-        with:
-          otlpEndpoint: grpc://api.honeycomb.io:443/
-          otlpHeaders: "x-honeycomb-team=${{ secrets.HONEYCOMB_GHA_SECRET }},x-honeycomb-dataset=${{ vars.HONEYCOMB_GHA_DATASET }}"
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          if [ "$count" -eq 0 ]; then
+            echo "::error::Add one SemVer label to this PR: ${VALID_LABELS// / | }"
+            exit 1
+          fi
+          if [ "$count" -gt 1 ]; then
+            echo "::error::Only one SemVer label is allowed, found: ${found}"
+            exit 1
+          fi
+          echo "SemVer label: ${found}"
