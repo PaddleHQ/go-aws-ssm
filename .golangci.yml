@@ -91,8 +91,12 @@ linters:
     - usetesting
     - wastedassign
     - whitespace
+    - errorlint
+    - forbidigo
+    - gocognit
     - modernize
     - nilnil
+    - paralleltest
     - usetesting
     - wrapcheck
   settings:
@@ -155,6 +159,18 @@ linters:
     testifylint:
       disable:
         - require-error
+    forbidigo:
+      forbid:
+        - pattern: ^t\.(Error|Errorf|Fatal|Fatalf)$
+          msg: use testify assert/require instead of a bare t check
+        - pattern: ^reflect\.DeepEqual$
+          msg: use testify assert.Equal instead of reflect.DeepEqual
+        - pattern: ^span\.(SetAttributes|AddEvent)$
+          msg: record facts with telemetry.Annotate, not raw span APIs
+    gocognit:
+      min-complexity: 10
+    paralleltest:
+      ignore-missing-subtests: true
     usetesting:
       ## --fix rewrites t.Cleanup closures to t.Context(), which is already cancelled there;
       ## use context.WithoutCancel(t.Context()) or //nolint:usetesting instead.
@@ -190,6 +206,17 @@ linters:
           - nilnil
           - wrapcheck
         path: _test\.go
+      - linters:
+          - gocognit
+        path: _test\.go
+      - linters:
+          - forbidigo
+        path-except: _test\.go
+        text: (testify|reflect\.DeepEqual)
+      ## Repository and BDD suites share a database, so their tests run sequentially.
+      - linters:
+          - paralleltest
+        path: (repository/.*_test\.go|fixtures_test\.go|bdd_test\.go)$
     paths:
       - third_party$
       - builtin$
