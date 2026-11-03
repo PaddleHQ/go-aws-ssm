@@ -32,10 +32,8 @@ jobs:
       - name: Harden the runner
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: block
-          allowed-endpoints: >
-            api.github.com:443
-            github.com:443
+          use-policy-store: true
+          api-key: ${{ secrets.STEPSECURITY_POLICY_STORE_API_KEY }}
 
       - name: Create release based on label
         uses: step-security/release-on-push-action@b9dee0685e99e905fe90cba8ba9ed92c7f3806b4 # v0.28.6
