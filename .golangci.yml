@@ -97,6 +97,7 @@ linters:
     - modernize
     - nilnil
     - paralleltest
+    - sloglint
     - usetesting
     - wrapcheck
   settings:
@@ -147,6 +148,7 @@ linters:
     sloglint:
       context: all
       static-msg: true
+      attr-only: true
     staticcheck:
       checks:
         - all
@@ -167,6 +169,10 @@ linters:
           msg: use testify assert.Equal instead of reflect.DeepEqual
         - pattern: ^span\.(SetAttributes|AddEvent)$
           msg: record facts with telemetry.Annotate, not raw span APIs
+        - pattern: ^plog\.SetField$
+          msg: record facts with telemetry.Annotate, not plog.SetField
+        - pattern: ^os\.(Getenv|LookupEnv)$
+          msg: read configuration in internal/settings, not with os.Getenv
     gocognit:
       min-complexity: 10
     paralleltest:
@@ -213,6 +219,10 @@ linters:
           - forbidigo
         path-except: _test\.go
         text: (testify|reflect\.DeepEqual)
+      - linters:
+          - forbidigo
+        path: (internal/settings/|cmd/|_test\.go)
+        text: internal/settings
       ## Repository and BDD suites share a database, so their tests run sequentially.
       - linters:
           - paralleltest
