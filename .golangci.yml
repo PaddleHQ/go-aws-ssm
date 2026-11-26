@@ -91,8 +91,14 @@ linters:
     - usetesting
     - wastedassign
     - whitespace
+    - errorlint
+    - forbidigo
+    - gocognit
     - modernize
     - nilnil
+    - paralleltest
+    - sloglint
+    - testpackage
     - usetesting
     - wrapcheck
   settings:
@@ -143,6 +149,7 @@ linters:
     sloglint:
       context: all
       static-msg: true
+      attr-only: true
     staticcheck:
       checks:
         - all
@@ -155,6 +162,25 @@ linters:
     testifylint:
       disable:
         - require-error
+    forbidigo:
+      forbid:
+        - pattern: ^t\.(Error|Errorf|Fatal|Fatalf)$
+          msg: use testify assert/require instead of a bare t check
+        - pattern: ^reflect\.DeepEqual$
+          msg: use testify assert.Equal instead of reflect.DeepEqual
+        - pattern: ^span\.(SetAttributes|AddEvent)$
+          msg: record facts with telemetry.Annotate, not raw span APIs
+        - pattern: ^plog\.SetField$
+          msg: record facts with telemetry.Annotate, not plog.SetField
+        - pattern: ^os\.(Getenv|LookupEnv)$
+          msg: read configuration in internal/settings, not with os.Getenv
+    gocognit:
+      min-complexity: 10
+    paralleltest:
+      ignore-missing-subtests: true
+    testpackage:
+      ## Internal tests go in *_internal_test.go; export_test.go bridges are not allowed.
+      skip-regexp: internal_test\.go$
     usetesting:
       ## --fix rewrites t.Cleanup closures to t.Context(), which is already cancelled there;
       ## use context.WithoutCancel(t.Context()) or //nolint:usetesting instead.
@@ -190,6 +216,21 @@ linters:
           - nilnil
           - wrapcheck
         path: _test\.go
+      - linters:
+          - gocognit
+        path: _test\.go
+      - linters:
+          - forbidigo
+        path-except: _test\.go
+        text: (testify|reflect\.DeepEqual)
+      - linters:
+          - forbidigo
+        path: (internal/settings/|cmd/|_test\.go)
+        text: internal/settings
+      ## Repository and BDD suites share a database, so their tests run sequentially.
+      - linters:
+          - paralleltest
+        path: (repository/.*_test\.go|fixtures_test\.go|bdd_test\.go)$
     paths:
       - third_party$
       - builtin$
