@@ -98,6 +98,7 @@ linters:
     - nilnil
     - paralleltest
     - sloglint
+    - testpackage
     - usetesting
     - wrapcheck
   settings:
@@ -177,6 +178,9 @@ linters:
       min-complexity: 10
     paralleltest:
       ignore-missing-subtests: true
+    testpackage:
+      ## Internal tests go in *_internal_test.go; export_test.go bridges are not allowed.
+      skip-regexp: internal_test\.go$
     usetesting:
       ## --fix rewrites t.Cleanup closures to t.Context(), which is already cancelled there;
       ## use context.WithoutCancel(t.Context()) or //nolint:usetesting instead.
